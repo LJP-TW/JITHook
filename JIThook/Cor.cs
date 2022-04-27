@@ -127,8 +127,12 @@ namespace JIThook
         [StructLayout(LayoutKind.Sequential)]
         public unsafe struct CorMethodInfo64 : ICorMethodInfo
         {
+            // CORINFO_METHOD_HANDLE
             public IntPtr ftn;
+
+            // CORINFO_MODULE_HANDLE
             public IntPtr scope;
+
             public byte* ilCode;
             public UInt32 ilCodeSize;
             public UInt32 maxStack;

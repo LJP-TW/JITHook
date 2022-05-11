@@ -25,6 +25,7 @@
 
 typedef void *func(void);
 
+void **CorJitCompiler;
 compileMethodFunc *originCompileMethod;
 
 void openPackedFile(const char *filename, char **fileData, int *fileLength)
@@ -234,6 +235,11 @@ CorJitResult compileMethodHook(
 {
     printf("[*] hooking!\n");
 
+    // Check whether the hook has been edited
+    if (CorJitCompiler[0] != compileMethodHook) {
+        printf("[*] Hook has been edited!\n");
+    }
+
     return originCompileMethod(thisptr, comp, info, flags, nativeEntry, nativeSizeOfCode);
 }
 
@@ -241,7 +247,6 @@ int jitHook(void)
 {
     HMODULE clrjit;
     func *getjit;
-    void **CorJitCompiler;
     DWORD old;
     
     // Preloading clrjit.dll

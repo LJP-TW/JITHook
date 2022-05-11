@@ -33,6 +33,7 @@ compileMethodFunc *originCompileMethod;
 
 struct methodDefInfo {
     std::string name;
+    BYTE *header;
     BYTE *code;
     UINT codesize;
 };
@@ -55,7 +56,17 @@ void openPackedFile(const char *filename, char **fileData, int *fileLength)
     target.close();
 
     printf("[*] file: %s\n", filename);
-    printf("[*] file length: %d\n", fileLength);
+    printf("[*] file length: %d\n", *fileLength);
+}
+
+void saveFile(char *fileData, int fileLength)
+{
+    std::ofstream target("output.exe_", std::ofstream::binary);
+
+    target.write(fileData, fileLength);
+    target.close();
+
+    printf("[*] Checkout output.exe_\n");
 }
 
 int clrHost(ICorRuntimeHost **pRuntimeHost)
@@ -279,9 +290,16 @@ CorJitResult compileMethodHook(
         }
     }
 
-    // IL has been edited
+    // IL has been edited, update it
     printf("\t[!] IL has been edited!\n");
 
+    if (info->ILCodeSize > method.codesize) {
+        printf("\t[!] TODO: new IL is larger than origin IL and may not have space to store it\n");
+        goto HookEnd;
+    }
+
+    // Modify origin IL
+    memcpy(method.code, info->ILCode, info->ILCodeSize);
 
 HookEnd:
     return originCompileMethod(thisptr, comp, info, flags, nativeEntry, nativeSizeOfCode);
@@ -427,6 +445,7 @@ void assemblyAnalyze(char *baseaddr)
         UINT codesize;
         int format;
         // ECMA-335 6th II.22.26
+        BYTE *header;
         UINT rva = *(UINT *)method_table;
         USHORT name_idx = *(USHORT *)(method_table + 0x8);
         std::string name((char *)(strings_stream + name_idx));
@@ -439,33 +458,35 @@ void assemblyAnalyze(char *baseaddr)
             continue;
         }
 
-        format = *(char *)((BYTE *)baseaddr + rva + offset) & 1;
+        header = (BYTE *)baseaddr + rva + offset;
+
+        format = *header & 1;
 
         if (format == 1)
         {
             // CorILMethod_FatFormat
-            codesize = *(UINT *)((BYTE *)baseaddr + rva + offset + 4);
-            code = (BYTE *)baseaddr + rva + offset + 12;
+            codesize = *(UINT *)(header + 4);
+            code = header + 12;
         }
         else
         {
             // CorILMethod_TinyFormat
-            codesize = *((BYTE *)baseaddr + rva + offset) >> 2;
-            code = (BYTE *)baseaddr + rva + offset + 1;
+            codesize = *header >> 2;
+            code = header + 1;
         }
 
         printf("\t\t[*] rva: %x\n", rva);
         printf("\t\t[*] IL code size: %#x\n", codesize);
         printf("\t\t[*] IL code: %p\n", code);
 
-        methodMap[token] = { name, code, codesize };
+        methodMap[token] = { name, header, code, codesize };
     }
 }
 
 int main(int argc, char *argv[])
 {
     ICorRuntimeHost *pRuntimeHost = NULL; // Alternative: ICLRRuntimeHost
-    mscorlib::_AssemblyPtr pAssembly = NULL;    
+    mscorlib::_AssemblyPtr pAssembly = NULL;
     char *fileData;
     int fileLength;
 
@@ -486,6 +507,10 @@ int main(int argc, char *argv[])
     if (assemblyRun(pAssembly, argc, argv) < 0) {
         exit(1);
     }
+
+    saveFile(fileData, fileLength);
+
+    printf("[*] CLRHosting Terminated\n");
 
     return 0;
 }

@@ -57,7 +57,7 @@ struct CORINFO_METHOD_INFO
 {
     CORINFO_METHOD_HANDLE       ftn;
     CORINFO_MODULE_HANDLE       scope;
-    uint8_t *ILCode;
+    uint8_t                    *ILCode;
     unsigned                    ILCodeSize;
     unsigned                    maxStack;
     unsigned                    EHcount;

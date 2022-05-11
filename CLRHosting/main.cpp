@@ -344,10 +344,17 @@ void assemblyAnalyze(char *baseaddr)
     USHORT section_cnt = *(USHORT *)(nt_hdr + 0x6);
     UINT optional_hdr_size = *(USHORT *)(nt_hdr + 0x14);
     BYTE *optional_hdr = nt_hdr + 0x18;
+    USHORT magic = *(USHORT *)optional_hdr;
+
+    if (magic != 0x20b) {
+        printf("[!] Only support 64-bit program\n");
+        exit(1);
+    }
+
     BYTE *section_hdr = optional_hdr + optional_hdr_size;
     INT offset = 0;
     UINT image_cor20_hdr_rva = *(UINT *)(optional_hdr + 0xe0);
-    
+        
     // Find raw addr of image_cor20_hdr
     BYTE *section_cur = section_hdr;
     while (section_cnt--) {
@@ -490,7 +497,12 @@ int main(int argc, char *argv[])
     char *fileData;
     int fileLength;
 
-    openPackedFile(PACKED_ASSEMBLY_NAME, &fileData, &fileLength);
+    if (argc > 1) {
+        openPackedFile(argv[1], &fileData, &fileLength);
+    }
+    else {
+        openPackedFile(PACKED_ASSEMBLY_NAME, &fileData, &fileLength);
+    }
 
     if (clrHost(&pRuntimeHost) < 0) {
         exit(1);

@@ -26,21 +26,143 @@
 // target dotnet exe
 #define PACKED_ASSEMBLY_NAME "JIThook.exe"
 
+#define ALIGN(num, base) (((UINT64)num + base - 1) & ~(base - 1))
+
 typedef void *func(void);
 
 void **CorJitCompiler;
 compileMethodFunc *originCompileMethod;
 void *newCompileMethod;
 
+struct PEStruct_t {
+    BYTE        *PEFile;
+    UINT         PEFileLength;
+    UINT         sectionCnt;
+    UINT         sectionHdrOffset;
+    UINT         sectionRawAlignment;
+    UINT         sectionVAAlignment;
+    UINT         newSectionRaw;
+    UINT         newSectionVA;
+};
+PEStruct_t PEStruct;
+
+UINT newMethodOffset;
+
 struct methodDefInfo {
-    std::string name;
-    BYTE *header;
-    BYTE *code;
-    UINT codesize;
+    UINT *pRVA;
+    std::string methodName;
+    BYTE *methodHeader;
+    BYTE *methodILCode;
+    UINT methodILCodeSize;
 };
 std::unordered_map<int, methodDefInfo> methodMap;
 
-void openPackedFile(const char *filename, char **fileData, int *fileLength)
+struct PESection_t {
+    BYTE       name[8];
+    UINT       VASize;
+    UINT       VA;
+    UINT       rawSize;
+    UINT       raw;
+    UINT       ptrReloc;
+    UINT       ptrLN;
+    USHORT     nReloc;
+    USHORT     nLN;
+    UINT       characteristics;
+};
+
+/*
+ * Parse Method table stream of "#~" Stream
+ */
+void assemblyAnalyze(void);
+
+/*
+ * Create a section with size 0x1000
+ */
+void createNewSection(void)
+{
+    UINT newSectionSize = ALIGN(0x1000, PEStruct.sectionRawAlignment);
+    UINT newRaw = ALIGN(PEStruct.PEFileLength, PEStruct.sectionRawAlignment);
+    UINT newPEFileLength = newRaw + newSectionSize;
+    BYTE *newPEFile = new BYTE[newPEFileLength];
+    BYTE *sectionHdr, *sectionCur;
+    PESection_t *newSection;
+    UINT newSectionVA = 0;
+
+    memcpy(newPEFile, PEStruct.PEFile, PEStruct.PEFileLength);
+
+    sectionHdr = newPEFile + PEStruct.sectionHdrOffset;
+
+    sectionCur = sectionHdr;
+    for (int i = 0; i < PEStruct.sectionCnt; ++i) {
+        UINT va = *(UINT *)(sectionCur + 0xc);
+        UINT vasize = *(UINT *)(sectionCur + 0x8);
+        UINT nextVA = ALIGN(va + vasize, PEStruct.sectionVAAlignment);
+
+        if (nextVA > newSectionVA) {
+            newSectionVA = nextVA;
+        }
+
+        sectionCur += 0x28;
+    }
+
+    // TODO: There may not be enough space to create a new section header
+    newSection = (PESection_t *)sectionCur;
+    memcpy(newSection->name, ".ljp", 5);
+    newSection->ptrReloc = NULL;
+    newSection->ptrLN = NULL;
+    newSection->nReloc = 0;
+    newSection->nLN = 0;
+    newSection->VA = newSectionVA;
+    newSection->VASize = 0x1000;
+    newSection->raw = newRaw;
+    newSection->rawSize = 0x1000;
+
+    delete[] PEStruct.PEFile;
+    PEStruct.PEFile = newPEFile;
+    PEStruct.PEFileLength = newPEFileLength;
+
+    // Redo analyze
+    methodMap.clear();
+    assemblyAnalyze();
+
+    PEStruct.newSectionRaw = newRaw;
+    PEStruct.newSectionVA  = newSectionVA;
+}
+
+/*
+ * Return RVA of new method
+ * 
+ * [*] Only support CorILMethod_TinyFormat for now
+ */
+INT createNewMethodBody(uint8_t *ILCode, UINT32 ILCodeSize)
+{
+    UINT pos;
+    UINT rva;
+    BYTE header[12];
+
+    if (ILCodeSize >= 1 << 6) {
+        printf("[!] Only support CorILMethod_TinyFormat for now\n");
+        return -1;
+    }
+
+    rva = PEStruct.newSectionVA + newMethodOffset;
+
+    // CorILMethod_TinyFormat
+    header[0] = (ILCodeSize << 2) | 0x02;
+    
+    // Copy header & ILCode
+    pos = PEStruct.newSectionRaw + newMethodOffset;
+    
+    memcpy(PEStruct.PEFile + pos, header, 1);
+    memcpy(PEStruct.PEFile + pos + 1, ILCode, ILCodeSize);
+
+    // Done
+    newMethodOffset = newMethodOffset + 1 + ILCodeSize;
+
+    return rva;
+}
+
+void openPackedFile(const char *filename)
 {
     std::ifstream target(filename, std::ios::in | std::ios::binary | std::ios::ate);
 
@@ -48,23 +170,23 @@ void openPackedFile(const char *filename, char **fileData, int *fileLength)
         exit(1);
     }
 
-    *fileLength = target.tellg();
+    PEStruct.PEFileLength = target.tellg();
 
-    *fileData = new char[*fileLength];
+    PEStruct.PEFile = new BYTE[PEStruct.PEFileLength];
     target.seekg(0, std::ios::beg);
-    target.read(*fileData, *fileLength);
+    target.read((char *)PEStruct.PEFile, PEStruct.PEFileLength);
 
     target.close();
 
     printf("[*] file: %s\n", filename);
-    printf("[*] file length: %d\n", *fileLength);
+    printf("[*] file length: %d\n", PEStruct.PEFileLength);
 }
 
-void saveFile(char *fileData, int fileLength)
+void saveFile(void)
 {
     std::ofstream target("output.exe_", std::ofstream::binary);
 
-    target.write(fileData, fileLength);
+    target.write((char *)PEStruct.PEFile, PEStruct.PEFileLength);
     target.close();
 
     printf("[*] Checkout output.exe_\n");
@@ -281,19 +403,19 @@ CorJitResult compileMethodHook(
     method = methodMap[token];
 
     printf("\t[*] Token: %x\n", token);
-    printf("\t[*] Name: %s\n", method.name.c_str());
+    printf("\t[*] Name: %s\n", method.methodName.c_str());
 
     // Check whether the IL has been edited
-    if (info->ILCodeSize == method.codesize) {
+    if (info->ILCodeSize == method.methodILCodeSize) {
         int i = 0;
         
-        for (; i < method.codesize; ++i) {
-            if (info->ILCode[i] != method.code[i]) {
+        for (; i < method.methodILCodeSize; ++i) {
+            if (info->ILCode[i] != method.methodILCode[i]) {
                 break;
             }
         }
 
-        if (i == method.codesize) {
+        if (i == method.methodILCodeSize) {
             goto HookEnd;
         }
     }
@@ -301,13 +423,32 @@ CorJitResult compileMethodHook(
     // IL has been edited, update it
     printf("\t[!] IL has been edited!\n");
 
-    if (info->ILCodeSize > method.codesize) {
+    if (info->ILCodeSize > method.methodILCodeSize) {
+        INT ILAddr;
         printf("\t[!] TODO: new IL is larger than origin IL and may not have space to store it\n");
-        goto HookEnd;
-    }
 
-    // Modify origin IL
-    memcpy(method.code, info->ILCode, info->ILCodeSize);
+        // Add new section
+        if (!PEStruct.newSectionVA) {
+            createNewSection();
+        }
+
+        // Make the IL live in the new section
+        ILAddr = createNewMethodBody(info->ILCode, info->ILCodeSize);
+
+        if (ILAddr < 0) {
+            goto HookEnd;
+        }
+
+        // Re-find method
+        method = methodMap[token];
+
+        // Modify RVA of MethodDef entry
+        *method.pRVA = ILAddr;
+    }
+    else {
+        // Modify origin IL
+        memcpy(method.methodILCode, info->ILCode, info->ILCodeSize);
+    }
 
 HookEnd:
     ret = originCompileMethod(thisptr, comp, info, flags, nativeEntry, nativeSizeOfCode);
@@ -367,14 +508,12 @@ int jitHook(void)
     printf("[*] originCompileMethod: %p\n", originCompileMethod);
 }
 
-/*
- * Parse Method table stream of "#~" Stream
- */
-void assemblyAnalyze(char *baseaddr)
+void assemblyAnalyze(void)
 {
     printf("[*] Analyze assembly\n");
 
-    BYTE *nt_hdr = (BYTE *)baseaddr + *(UINT *)(baseaddr + 0x3c);
+    BYTE *baseaddr = PEStruct.PEFile;
+    BYTE *nt_hdr = baseaddr + *(UINT *)(baseaddr + 0x3c);
     USHORT section_cnt = *(USHORT *)(nt_hdr + 0x6);
     UINT optional_hdr_size = *(USHORT *)(nt_hdr + 0x14);
     BYTE *optional_hdr = nt_hdr + 0x18;
@@ -388,7 +527,12 @@ void assemblyAnalyze(char *baseaddr)
     BYTE *section_hdr = optional_hdr + optional_hdr_size;
     INT offset = 0;
     UINT image_cor20_hdr_rva = *(UINT *)(optional_hdr + 0xe0);
-        
+
+    PEStruct.sectionCnt = section_cnt;
+    PEStruct.sectionHdrOffset = section_hdr - baseaddr;
+    PEStruct.sectionRawAlignment = *(UINT *)(optional_hdr + 0x24);
+    PEStruct.sectionVAAlignment  = *(UINT *)(optional_hdr + 0x20);
+
     // Find raw addr of image_cor20_hdr
     BYTE *section_cur = section_hdr;
     while (section_cnt--) {
@@ -404,9 +548,9 @@ void assemblyAnalyze(char *baseaddr)
         section_cur += 0x28;
     }
 
-    BYTE *image_cor20_hdr = (BYTE *)baseaddr + image_cor20_hdr_rva + offset;
+    BYTE *image_cor20_hdr = baseaddr + image_cor20_hdr_rva + offset;
     UINT metadata_rva = *(UINT *)(image_cor20_hdr + 8);
-    BYTE *metadata_root = (BYTE *)baseaddr + metadata_rva + offset;
+    BYTE *metadata_root = baseaddr + metadata_rva + offset;
     UINT version_len = *(UINT *)(metadata_root + 0xc);
     UINT padded_version_len = (UINT)((version_len + 3) & (~0x03));
     UINT num_of_streams = *(USHORT *)(metadata_root + 0x12 + padded_version_len);
@@ -487,7 +631,7 @@ void assemblyAnalyze(char *baseaddr)
         int format;
         // ECMA-335 6th II.22.26
         BYTE *header;
-        UINT rva = *(UINT *)method_table;
+        UINT *prva = (UINT *)method_table;
         USHORT name_idx = *(USHORT *)(method_table + 0x8);
         std::string name((char *)(strings_stream + name_idx));
         UINT token = 0x06000000 + i + 1;
@@ -495,11 +639,11 @@ void assemblyAnalyze(char *baseaddr)
         printf("\t[*] Method: %s\n", name.c_str());
         printf("\t\t[*] token: %x\n", token);
 
-        if (!rva) {
+        if (!*prva) {
             continue;
         }
 
-        header = (BYTE *)baseaddr + rva + offset;
+        header = baseaddr + *prva + offset;
 
         format = *header & 1;
 
@@ -516,11 +660,11 @@ void assemblyAnalyze(char *baseaddr)
             code = header + 1;
         }
 
-        printf("\t\t[*] rva: %x\n", rva);
+        printf("\t\t[*] rva: %x\n", *prva);
         printf("\t\t[*] IL code size: %#x\n", codesize);
         printf("\t\t[*] IL code: %p\n", code);
 
-        methodMap[token] = { name, header, code, codesize };
+        methodMap[token] = { prva, name, header, code, codesize };
     }
 }
 
@@ -528,14 +672,12 @@ int main(int argc, char *argv[])
 {
     ICorRuntimeHost *pRuntimeHost = NULL; // Alternative: ICLRRuntimeHost
     mscorlib::_AssemblyPtr pAssembly = NULL;
-    char *fileData;
-    int fileLength;
 
     if (argc > 1) {
-        openPackedFile(argv[1], &fileData, &fileLength);
+        openPackedFile(argv[1]);
     }
     else {
-        openPackedFile(PACKED_ASSEMBLY_NAME, &fileData, &fileLength);
+        openPackedFile(PACKED_ASSEMBLY_NAME);
     }
 
     if (clrHost(&pRuntimeHost) < 0) {
@@ -544,9 +686,12 @@ int main(int argc, char *argv[])
 
     jitHook();
 
-    assemblyAnalyze(fileData);
+    assemblyAnalyze();
 
-    if (assemblyLoad(pRuntimeHost, (mscorlib::_AssemblyPtr *)&pAssembly, fileData, fileLength) < 0) {
+    if (assemblyLoad(pRuntimeHost,
+                     (mscorlib::_AssemblyPtr *)&pAssembly,
+                     (char *)PEStruct.PEFile,
+                     PEStruct.PEFileLength) < 0) {
         exit(1);
     }
 
@@ -554,7 +699,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    saveFile(fileData, fileLength);
+    saveFile();
 
     printf("[*] CLRHosting Terminated\n");
 

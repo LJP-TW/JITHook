@@ -30,6 +30,7 @@ typedef void *func(void);
 
 void **CorJitCompiler;
 compileMethodFunc *originCompileMethod;
+void *newCompileMethod;
 
 struct methodDefInfo {
     std::string name;
@@ -243,6 +244,12 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     printf("[+] pMethodInfo->Invoke_3(...) succeeded\n");
 }
 
+void reportNative(uint8_t **nativeEntry, uint32_t *nativeSizeOfCode)
+{
+    printf("\t[*] Native entry: %p\n", *nativeEntry);
+    printf("\t[*] Native size of code: %x\n", *nativeSizeOfCode);
+}
+
 // Ref: https://github.com/dotnet/runtime/blob/4ed596ef63e60ce54cfb41d55928f0fe45f65cf3/src/coreclr/inc/corjit.h#L192
 CorJitResult compileMethodHook(
     void                            *thisptr,
@@ -255,11 +262,12 @@ CorJitResult compileMethodHook(
 {
     int token;
     methodDefInfo method;
+    CorJitResult ret;
 
     printf("[*] hooking!\n");
 
     // Check whether the hook has been edited
-    if (CorJitCompiler[0] != compileMethodHook) {
+    if (CorJitCompiler[0] != newCompileMethod) {
         printf("[*] Hook has been edited!\n");
     }
 
@@ -302,7 +310,11 @@ CorJitResult compileMethodHook(
     memcpy(method.code, info->ILCode, info->ILCodeSize);
 
 HookEnd:
-    return originCompileMethod(thisptr, comp, info, flags, nativeEntry, nativeSizeOfCode);
+    ret = originCompileMethod(thisptr, comp, info, flags, nativeEntry, nativeSizeOfCode);
+
+    reportNative(nativeEntry, nativeSizeOfCode);
+
+    return ret;
 }
 
 int jitHook(void)
@@ -310,6 +322,11 @@ int jitHook(void)
     HMODULE clrjit;
     func *getjit;
     DWORD old;
+    UINT64 iaddr, compileMethodHookIAddr;
+    BYTE *addr;
+    BYTE trampoline[] = { 0x48, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rax, 0
+                          0xff, 0xe0,                                                 // jmp rax
+                        };
     
     // Preloading clrjit.dll
     AddDllDirectory(L"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\");
@@ -320,13 +337,30 @@ int jitHook(void)
     }
     printf("[*] Load clrjit.dll\n");
 
+    // Write trampoline
+    addr = (BYTE *)clrjit + 0x40;
+    printf("[*] Write trampoline to address %p\n", addr);
+
+    compileMethodHookIAddr = (UINT64)compileMethodHook;
+    for (int i = 0; i < 8; ++i) {
+        trampoline[2 + i] = (compileMethodHookIAddr >> (i * 8)) & 0xff;
+    }
+
+    VirtualProtect(addr, sizeof(trampoline), PAGE_EXECUTE_READWRITE, &old);
+
+    for (int i = 0; i < sizeof(trampoline); ++i) {
+        addr[i] = trampoline[i];
+    }
+
+    newCompileMethod = addr;
+
     // Hook
     getjit = (func *)GetProcAddress(clrjit, "getJit");
     CorJitCompiler = *(void ***)getjit();
     originCompileMethod = (compileMethodFunc *)CorJitCompiler[0];
     
     VirtualProtect(&CorJitCompiler[0], 0x8, PAGE_EXECUTE_READWRITE, &old);
-    CorJitCompiler[0] = compileMethodHook;
+    CorJitCompiler[0] = newCompileMethod;
     VirtualProtect(&CorJitCompiler[0], 0x8, old, &old);
 
     printf("[*] Hook compileMethod\n");

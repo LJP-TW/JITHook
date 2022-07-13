@@ -137,37 +137,89 @@ void createNewSection(void)
     PEStruct.newSectionVA  = newSectionVA;
 }
 
-/*
- * Return RVA of new method
- * 
- * [*] Only support CorILMethod_TinyFormat for now
- */
-INT createNewMethodBody(uint8_t *ILCode, UINT32 ILCodeSize)
+static INT createNewMethodBodyTiny(uint8_t *ILCode, UINT ILCodeSize)
 {
     UINT pos;
     UINT rva;
     BYTE header[12];
-
-    if (ILCodeSize >= 1 << 6) {
-        logPrintf(0, "[!] Only support CorILMethod_TinyFormat for now\n");
-        return -1;
-    }
+    UINT hdrSize = 1;
 
     rva = PEStruct.newSectionVA + newMethodOffset;
 
     // CorILMethod_TinyFormat
     header[0] = (ILCodeSize << 2) | 0x02;
-    
+
     // Copy header & ILCode
     pos = PEStruct.newSectionRaw + newMethodOffset;
-    
-    memcpy(PEStruct.PEFile + pos, header, 1);
-    memcpy(PEStruct.PEFile + pos + 1, ILCode, ILCodeSize);
+
+    memcpy(PEStruct.PEFile + pos, header, hdrSize);
+    memcpy(PEStruct.PEFile + pos + hdrSize, ILCode, ILCodeSize);
 
     // Done
-    newMethodOffset = newMethodOffset + 1 + ILCodeSize;
+    newMethodOffset = newMethodOffset + hdrSize + ILCodeSize;
 
     return rva;
+}
+
+static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
+                                  USHORT flags, USHORT maxStack,
+                                  UINT localVarSigTok)
+{
+    UINT pos;
+    UINT rva;
+    BYTE header[12];
+    UINT hdrSize = 12;
+    USHORT *pFlags;
+    USHORT *pMaxStack;
+    UINT *pCodeSize;
+    UINT *pLocalVarSigTok;
+
+    rva = PEStruct.newSectionVA + newMethodOffset;
+
+    // CorILMethod_FatFormat
+    pFlags = (USHORT *)&header[0];
+    pMaxStack = (USHORT *)&header[2];
+    pCodeSize = (UINT *)&header[4];
+    pLocalVarSigTok = (UINT *)&header[8];
+
+    *pFlags = flags | 0x03 | 0x3000;
+    *pMaxStack = maxStack;
+    *pCodeSize = ILCodeSize;
+    *pLocalVarSigTok = localVarSigTok;
+
+    // Copy header & ILCode
+    pos = PEStruct.newSectionRaw + newMethodOffset;
+
+    memcpy(PEStruct.PEFile + pos, header, hdrSize);
+    memcpy(PEStruct.PEFile + pos + hdrSize, ILCode, ILCodeSize);
+
+    // Done
+    newMethodOffset = newMethodOffset + hdrSize + ILCodeSize;
+
+    return rva;
+}
+
+/*
+ * Return RVA of new method
+ */
+INT createNewMethodBody(struct CORINFO_METHOD_INFO *info)
+{
+    uint8_t *ILCode;
+    UINT ILCodeSize;
+    UINT localVarSigTok;
+
+    ILCode = info->ILCode;
+    ILCodeSize = info->ILCodeSize;
+    localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x508);
+
+    if (ILCodeSize >= 1 << 6 ||
+        ((localVarSigTok >> 24) & 0xff) == 0x11) {
+        // Fat format
+        return createNewMethodBodyFat(ILCode, ILCodeSize, 0x10, info->maxStack, localVarSigTok);
+    }
+
+    // Tiny format
+    return createNewMethodBodyTiny(ILCode, ILCodeSize);
 }
 
 void openPackedFile(const char *filename)
@@ -433,7 +485,6 @@ CorJitResult compileMethodHook(
 
     if (info->ILCodeSize > method.methodILCodeSize) {
         INT ILAddr;
-        logPrintf(0, "\t[!] TODO: new IL is larger than origin IL and may not have space to store it\n");
 
         // Add new section
         if (!PEStruct.newSectionVA) {
@@ -441,7 +492,7 @@ CorJitResult compileMethodHook(
         }
 
         // Make the IL live in the new section
-        ILAddr = createNewMethodBody(info->ILCode, info->ILCodeSize);
+        ILAddr = createNewMethodBody(info);
 
         if (ILAddr < 0) {
             goto HookEnd;

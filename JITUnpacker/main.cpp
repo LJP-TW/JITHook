@@ -1,10 +1,12 @@
 #define _CRT_SECURE_NO_WARNINGS
+
+#pragma warning( disable : 6031)
+
 #include <Windows.h>
 #include <comdef.h>
 
 // C-related
 #include <stdio.h>
-#include <stdarg.h>
 
 // C++-related
 #include <iostream>
@@ -18,15 +20,14 @@
 #pragma comment(lib, "mscoree.lib")
 
 // others
+#include "args.h"
 #include "corjit.h"
+#include "log.h"
 
 #define PAUSE() do { logPrintf(0, "PAUSE\n"); scanf("%*c"); } while(0)
 
 // auto_rename: https://stackoverflow.com/questions/55117881/load-c-sharp-assembly-in-c-c-mscoree-tlh-errors
 #import "C:\Windows\Microsoft.NET\Framework\v4.0.30319\mscorlib.tlb" raw_interfaces_only auto_rename
-
-// target dotnet exe
-#define PACKED_ASSEMBLY_NAME "JIThook.exe"
 
 #define ALIGN(num, base) (((UINT64)num + base - 1) & ~(base - 1))
 
@@ -35,13 +36,6 @@ typedef void *func(void);
 void **CorJitCompiler;
 compileMethodFunc *originCompileMethod;
 void *newCompileMethod;
-
-// Arguments
-static int verboseLevel;
-static std::string filename;
-
-// Log
-static int logPrintf(int level, const char *format, ...);
 
 struct PEStruct_t {
     BYTE        *PEFile;
@@ -527,33 +521,33 @@ void assemblyAnalyze(void)
     logPrintf(2, "[*] Analyze assembly\n");
 
     BYTE *baseaddr = PEStruct.PEFile;
-    BYTE *nt_hdr = baseaddr + *(UINT *)(baseaddr + 0x3c);
-    USHORT section_cnt = *(USHORT *)(nt_hdr + 0x6);
-    UINT optional_hdr_size = *(USHORT *)(nt_hdr + 0x14);
-    BYTE *optional_hdr = nt_hdr + 0x18;
-    USHORT magic = *(USHORT *)optional_hdr;
+    BYTE *ntHdr = baseaddr + *(UINT *)(baseaddr + 0x3c);
+    USHORT sectionCnt = *(USHORT *)(ntHdr + 0x6);
+    UINT optionalHdrSize = *(USHORT *)(ntHdr + 0x14);
+    BYTE *optionalHdr = ntHdr + 0x18;
+    USHORT magic = *(USHORT *)optionalHdr;
 
     if (magic != 0x20b) {
         logPrintf(0, "[!] Only support 64-bit program\n");
         exit(1);
     }
 
-    BYTE *section_hdr = optional_hdr + optional_hdr_size;
+    BYTE *sectionHdr = optionalHdr + optionalHdrSize;
     INT offset = 0;
-    UINT image_cor20_hdr_rva = *(UINT *)(optional_hdr + 0xe0);
+    UINT imageCor20HdrRva = *(UINT *)(optionalHdr + 0xe0);
 
-    PEStruct.sectionCnt = section_cnt;
-    PEStruct.sectionHdrOffset = section_hdr - baseaddr;
-    PEStruct.sectionRawAlignment = *(UINT *)(optional_hdr + 0x24);
-    PEStruct.sectionVAAlignment  = *(UINT *)(optional_hdr + 0x20);
+    PEStruct.sectionCnt = sectionCnt;
+    PEStruct.sectionHdrOffset = sectionHdr - baseaddr;
+    PEStruct.sectionRawAlignment = *(UINT *)(optionalHdr + 0x24);
+    PEStruct.sectionVAAlignment  = *(UINT *)(optionalHdr + 0x20);
 
-    // Find raw addr of image_cor20_hdr
-    BYTE *section_cur = section_hdr;
-    while (section_cnt--) {
+    // Find raw addr of imageCor20Hdr
+    BYTE *section_cur = sectionHdr;
+    while (sectionCnt--) {
         UINT va = *(UINT *)(section_cur + 0xc);
         UINT vasize = *(UINT *)(section_cur + 0x8);
 
-        if (va <= image_cor20_hdr_rva && image_cor20_hdr_rva < va + vasize) {
+        if (va <= imageCor20HdrRva && imageCor20HdrRva < va + vasize) {
             UINT ra = *(UINT *)(section_cur + 0x14);
             offset = ra - va;
             break;
@@ -562,62 +556,62 @@ void assemblyAnalyze(void)
         section_cur += 0x28;
     }
 
-    BYTE *image_cor20_hdr = baseaddr + image_cor20_hdr_rva + offset;
-    UINT metadata_rva = *(UINT *)(image_cor20_hdr + 8);
-    BYTE *metadata_root = baseaddr + metadata_rva + offset;
-    UINT version_len = *(UINT *)(metadata_root + 0xc);
-    UINT padded_version_len = (UINT)((version_len + 3) & (~0x03));
-    UINT num_of_streams = *(USHORT *)(metadata_root + 0x12 + padded_version_len);
-    BYTE *stream_hdr = metadata_root + 0x14 + padded_version_len;
-    BYTE *tilde_stream_hdr = NULL;
-    BYTE *strings_stream_hdr = NULL;
+    BYTE *imageCor20Hdr = baseaddr + imageCor20HdrRva + offset;
+    UINT metadataRva = *(UINT *)(imageCor20Hdr + 8);
+    BYTE *metadataRoot = baseaddr + metadataRva + offset;
+    UINT versionLen = *(UINT *)(metadataRoot + 0xc);
+    UINT paddedVersionLen = (UINT)((versionLen + 3) & (~0x03));
+    UINT numOfStreams = *(USHORT *)(metadataRoot + 0x12 + paddedVersionLen);
+    BYTE *streamHdr = metadataRoot + 0x14 + paddedVersionLen;
+    BYTE *tildeStreamHdr = NULL;
+    BYTE *stringsStreamHdr = NULL;
 
-    for (UINT i = 0; i < num_of_streams; ++i)
+    for (UINT i = 0; i < numOfStreams; ++i)
     {
-        std::string rcName((char *)(stream_hdr + 8));
+        std::string rcName((char *)(streamHdr + 8));
 
         if (rcName == "#~")
         {
-            tilde_stream_hdr = stream_hdr;
+            tildeStreamHdr = streamHdr;
         }
         else if (rcName == "#Strings")
         {
-            strings_stream_hdr = stream_hdr;
+            stringsStreamHdr = streamHdr;
         }
-        stream_hdr += 0x8 + ((rcName.length() + 4) & (~0x03));
+        streamHdr += 0x8 + ((rcName.length() + 4) & (~0x03));
     }
 
-    UINT tilde_iOffset = *(UINT *)tilde_stream_hdr;
-    UINT tilde_iSize = *(UINT *)(tilde_stream_hdr + 4);
+    UINT tildeIOffset = *(UINT *)tildeStreamHdr;
+    UINT tildeISize = *(UINT *)(tildeStreamHdr + 4);
 
-    UINT strings_iOffset = *(UINT *)strings_stream_hdr;
-    UINT strings_iSize = *(UINT *)(strings_stream_hdr + 4);
+    UINT stringsIOffset = *(UINT *)stringsStreamHdr;
+    UINT stringsISize = *(UINT *)(stringsStreamHdr + 4);
 
-    BYTE *strings_stream = metadata_root + strings_iOffset;
+    BYTE *stringsStream = metadataRoot + stringsIOffset;
 
     // ECMA-335 6th II.24.2.6
-    BYTE *table_stream = metadata_root + tilde_iOffset;
+    BYTE *tableStream = metadataRoot + tildeIOffset;
     
-    ULONGLONG maskvalid = *(ULONGLONG *)(table_stream + 8);
-    ULONGLONG masksorted = *(ULONGLONG *)(table_stream + 0x10);
+    ULONGLONG maskvalid = *(ULONGLONG *)(tableStream + 8);
+    ULONGLONG masksorted = *(ULONGLONG *)(tableStream + 0x10);
 
-    UINT *metadata_table_nums = new UINT[0x40];
-    BYTE *rows = table_stream + 0x18;
+    UINT *metadataTableNums = new UINT[0x40];
+    BYTE *rows = tableStream + 0x18;
 
-    for (ULONGLONG i = 0, l_maskvalid = maskvalid; l_maskvalid != 0; l_maskvalid >>= 1, i++)
+    for (ULONGLONG i = 0, lMaskvalid = maskvalid; lMaskvalid != 0; lMaskvalid >>= 1, i++)
     {
-        if ((l_maskvalid & 1) == 1)
+        if ((lMaskvalid & 1) == 1)
         {
-            metadata_table_nums[i] = *(UINT *)rows;
+            metadataTableNums[i] = *(UINT *)rows;
             rows += 4;
         }
         else
         {
-            metadata_table_nums[i] = 0;
+            metadataTableNums[i] = 0;
         }
     }
 
-    UINT metadata_table_sizes[] = {
+    UINT metadataTableSizes[] = {
         0xa, // module_size
         0x6, // typeref_size
         0xe, // typedef_size
@@ -633,21 +627,21 @@ void assemblyAnalyze(void)
 
     for (ULONG i = 1; i < 7; ++i)
     {
-        tables[i] = tables[i - 1] + metadata_table_nums[i - 1] * metadata_table_sizes[i - 1];
+        tables[i] = tables[i - 1] + metadataTableNums[i - 1] * metadataTableSizes[i - 1];
     }
 
-    BYTE *method_table = tables[6];
+    BYTE *methodTable = tables[6];
 
-    for (UINT i = 0; i < metadata_table_nums[6]; ++i, method_table += 0xe)
+    for (UINT i = 0; i < metadataTableNums[6]; ++i, methodTable += 0xe)
     {
         BYTE *code;
         UINT codesize;
         int format;
         // ECMA-335 6th II.22.26
         BYTE *header;
-        UINT *prva = (UINT *)method_table;
-        USHORT name_idx = *(USHORT *)(method_table + 0x8);
-        std::string name((char *)(strings_stream + name_idx));
+        UINT *prva = (UINT *)methodTable;
+        USHORT nameIdx = *(USHORT *)(methodTable + 0x8);
+        std::string name((char *)(stringsStream + nameIdx));
         UINT token = 0x06000000 + i + 1;
 
         logPrintf(2, "\t[*] Method: %s\n", name.c_str());
@@ -682,54 +676,14 @@ void assemblyAnalyze(void)
     }
 }
 
-static int logPrintf(int level, const char *format, ...)
-{
-    if (level > verboseLevel) {
-        return 0;
-    }
-
-    va_list args;
-    int ret;
-
-    va_start(args, format);
-
-    ret = vprintf(format, args);
-
-    va_end(args);
-
-    return ret;
-}
-
-static void parse_arg(int argc, char *argv[])
-{
-    if (argc <= 1)
-        return;
-
-    std::vector<std::string> args(&argv[1], &argv[argc]);
-
-    for (auto arg = args.begin(); arg != args.end(); arg++) {
-        if (*arg == "-v") {
-            arg++;
-            verboseLevel = stoi(*arg);
-        }
-        else {
-            filename = *arg;
-        }
-    }
-
-    if (filename.empty()) {
-        filename = PACKED_ASSEMBLY_NAME;
-    }
-}
-
 int main(int argc, char *argv[])
 {
     ICorRuntimeHost *pRuntimeHost = NULL; // Alternative: ICLRRuntimeHost
     mscorlib::_AssemblyPtr pAssembly = NULL;
 
-    parse_arg(argc, argv);
+    parseArg(argc, argv);
 
-    openPackedFile(filename.c_str());
+    openPackedFile(argFilename.c_str());
 
     if (clrHost(&pRuntimeHost) < 0) {
         exit(1);

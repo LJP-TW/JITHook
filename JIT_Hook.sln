@@ -13,6 +13,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "dnlib", "Lib\dnlib\src\dnli
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CLRHosting", "CLRHosting\CLRHosting.vcxproj", "{9F68AEBB-A28B-46BA-93DD-C3D9C30DEBD7}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "JITUnpacker", "JITUnpacker\JITUnpacker.vcxproj", "{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -69,6 +71,16 @@ Global
 		{9F68AEBB-A28B-46BA-93DD-C3D9C30DEBD7}.Release|x64.Build.0 = Release|x64
 		{9F68AEBB-A28B-46BA-93DD-C3D9C30DEBD7}.Release|x86.ActiveCfg = Release|Win32
 		{9F68AEBB-A28B-46BA-93DD-C3D9C30DEBD7}.Release|x86.Build.0 = Release|Win32
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Debug|Any CPU.ActiveCfg = Debug|Win32
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Debug|x64.ActiveCfg = Debug|x64
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Debug|x64.Build.0 = Debug|x64
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Debug|x86.ActiveCfg = Debug|Win32
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Debug|x86.Build.0 = Debug|Win32
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Release|Any CPU.ActiveCfg = Release|Win32
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Release|x64.ActiveCfg = Release|x64
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Release|x64.Build.0 = Release|x64
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Release|x86.ActiveCfg = Release|Win32
+		{F9CFFB9F-1988-4E06-B9C0-69AAD94FE002}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -21,11 +21,13 @@ namespace testprog
             ga = ga + gb;
         }
 
+        // The method is too large to encode the size (i.e., at least 64 bytes)
         static int fatFunc1(int a, int b)
         {
             return a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b;
         }
 
+        // There are local variables 
         static int fatFunc2(int a, int b)
         {
             int ret;
@@ -34,6 +36,8 @@ namespace testprog
 
             return ret;
         }
+
+        // Same as fatFunc2 but with different variable names
         static int fatFunc3(int c, int d)
         {
             int ret;
@@ -41,6 +45,29 @@ namespace testprog
             ret = c + d;
 
             return ret;
+        }
+
+        // There are exceptions
+        static int fatFunc4(int a)
+        {
+            if (a == 0)
+            {
+                throw new Exception("a = 0");
+            }
+            return a + 1;
+        }
+
+        // There are exceptions
+        static int fatFunc5(int a)
+        {
+            try
+            {
+                return fatFunc4(a) + 1;
+            }
+            catch
+            {
+                throw;
+            }
         }
         static void Main(string[] args)
         {
@@ -77,6 +104,27 @@ namespace testprog
             ret = fatFunc2(5, 6);
             // 11
             Console.WriteLine("ret: " + ret.ToString());
+
+            try
+            {
+                Console.WriteLine("Test fat function4 (There are exceptions)");
+                ret = fatFunc4(0);
+                Console.WriteLine("ret: " + ret.ToString());
+            } catch (Exception ex)
+            {
+                Console.WriteLine("Function4 exception: " + ex.Message);
+            }
+
+            try
+            {
+                Console.WriteLine("Test fat function5 (There are exceptions)");
+                ret = fatFunc5(0);
+                Console.WriteLine("ret: " + ret.ToString());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Function5 exception: " + ex.Message);
+            }
         }
     }
 }

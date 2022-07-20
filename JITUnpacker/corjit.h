@@ -1,5 +1,7 @@
 #pragma once
-// Ref: https://github.com/dotnet/runtime/blob/4ed596ef63e60ce54cfb41d55928f0fe45f65cf3/src/coreclr/inc/corjit.h
+// Ref: 
+// - https://github.com/dotnet/runtime/blob/62eb291312749c52507309d50051dd61538cc62d/src/coreclr/inc/corjit.h
+// - https://github.com/dotnet/runtime/blob/62eb291312749c52507309d50051dd61538cc62d/src/coreclr/inc/corinfo.h 
 #include <Windows.h>
 #include <dmerror.h>
 #include <comdef.h>
@@ -35,9 +37,7 @@ enum CorInfoOptions
     CORINFO_GENERICS_CTXT_FROM_THIS         = 0x00000020, // is this shared generic code that access the generic context from the this pointer?  If so, then if the method has SEH then the 'this' pointer must always be reported and kept alive.
     CORINFO_GENERICS_CTXT_FROM_METHODDESC   = 0x00000040, // is this shared generic code that access the generic context from the ParamTypeArg(that is a MethodDesc)?  If so, then if the method has SEH then the 'ParamTypeArg' must always be reported and kept alive. Same as CORINFO_CALLCONV_PARAMTYPE
     CORINFO_GENERICS_CTXT_FROM_METHODTABLE  = 0x00000080, // is this shared generic code that access the generic context from the ParamTypeArg(that is a MethodTable)?  If so, then if the method has SEH then the 'ParamTypeArg' must always be reported and kept alive. Same as CORINFO_CALLCONV_PARAMTYPE
-    CORINFO_GENERICS_CTXT_MASK              = (CORINFO_GENERICS_CTXT_FROM_THIS |
-                                               CORINFO_GENERICS_CTXT_FROM_METHODDESC |
-                                               CORINFO_GENERICS_CTXT_FROM_METHODTABLE),
+    CORINFO_GENERICS_CTXT_MASK              = CORINFO_GENERICS_CTXT_FROM_THIS | CORINFO_GENERICS_CTXT_FROM_METHODDESC | CORINFO_GENERICS_CTXT_FROM_METHODTABLE,
     CORINFO_GENERICS_CTXT_KEEP_ALIVE        = 0x00000100, // Keep the generics context alive throughout the method even if there is no explicit use, and report its location to the CLR
 
 };
@@ -67,11 +67,59 @@ struct CORINFO_METHOD_INFO
     CORINFO_SIG_INFO            locals;
 };
 
-typedef CorJitResult (compileMethodFunc)(
+typedef CorJitResult(compileMethodFunc)(
     void                            *thisptr,
     ICorJitInfo                     *comp,               /* IN */
     struct CORINFO_METHOD_INFO      *info,               /* IN */
     unsigned /* code:CorJitFlag */   flags,              /* IN */
     uint8_t                        **nativeEntry,        /* OUT */
     uint32_t                        *nativeSizeOfCode    /* OUT */
-);
+    );
+
+// These are the flags set on an CORINFO_EH_CLAUSE
+enum CORINFO_EH_CLAUSE_FLAGS
+{
+    CORINFO_EH_CLAUSE_NONE      = 0,
+    CORINFO_EH_CLAUSE_FILTER    = 0x0001,      // If this bit is on, then this EH entry is for a filter
+    CORINFO_EH_CLAUSE_FINALLY   = 0x0002,     // This clause is a finally clause
+    CORINFO_EH_CLAUSE_FAULT     = 0x0004,       // This clause is a fault clause
+    CORINFO_EH_CLAUSE_DUPLICATE = 0x0008,   // Duplicated clause. This clause was duplicated to a funclet which was pulled out of line
+    CORINFO_EH_CLAUSE_SAMETRY   = 0x0010,     // This clause covers same try block as the previous one. (Used by NativeAOT ABI.)
+};
+
+struct CORINFO_EH_CLAUSE
+{
+    CORINFO_EH_CLAUSE_FLAGS     Flags;
+    uint32_t                    TryOffset;
+    uint32_t                    TryLength;
+    uint32_t                    HandlerOffset;
+    uint32_t                    HandlerLength;
+    union
+    {
+        uint32_t                ClassToken;       // use for type-based exception handlers
+        uint32_t                FilterOffset;     // use for filter-based exception handlers (COR_ILEXCEPTION_FILTER is set)
+    };
+};
+
+typedef void (getEHinfoFunc)(
+    ICorJitInfo            *thisptr,
+    CORINFO_METHOD_HANDLE   ftn,              /* IN */
+    unsigned                EHnumber,         /* IN */
+    CORINFO_EH_CLAUSE      *clause            /* OUT */
+    );
+
+struct CorILMethod_FatFormat
+{
+    USHORT  flags; // and size
+    USHORT  maxStack;
+    UINT    codeSize;
+    UINT    localVarSigTok;
+};
+
+struct CorILMethod_Sect_EHTable
+{
+    BYTE                        kind;
+    BYTE                        dataSize;
+    USHORT                      reserved;
+    struct CORINFO_EH_CLAUSE    clauses[0];
+};

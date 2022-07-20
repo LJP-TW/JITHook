@@ -35,9 +35,11 @@ typedef void *func(void);
 
 void **CorJitCompiler;
 compileMethodFunc *originCompileMethod;
+getEHinfoFunc *getEHinfo;
 void *newCompileMethod;
 
-struct PEStruct_t {
+struct PEStruct_t
+{
     BYTE        *PEFile;
     UINT         PEFileLength;
     UINT         sectionCnt;
@@ -51,7 +53,8 @@ PEStruct_t PEStruct;
 
 UINT newMethodOffset;
 
-struct methodDefInfo {
+struct methodDefInfo
+{
     UINT *pRVA;
     std::string methodName;
     BYTE *methodHeader;
@@ -60,7 +63,8 @@ struct methodDefInfo {
 };
 std::unordered_map<int, methodDefInfo> methodMap;
 
-struct PESection_t {
+struct PESection_t
+{
     BYTE       name[8];
     UINT       VASize;
     UINT       VA;
@@ -114,6 +118,9 @@ void createNewSection(void)
     }
 
     // TODO: There may not be enough space to create a new section header
+    // TODO: Set characteristics of section
+    // TODO: Adjust VASize
+    // TODO: Adjust size of image
     newSection = (PESection_t *)sectionCur;
     memcpy(newSection->name, ".ljp", 5);
     newSection->ptrReloc = NULL;
@@ -162,39 +169,61 @@ static INT createNewMethodBodyTiny(uint8_t *ILCode, UINT ILCodeSize)
 }
 
 static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
-                                  USHORT flags, USHORT maxStack,
-                                  UINT localVarSigTok)
+                                  CORINFO_METHOD_INFO *info,
+                                  UINT localVarSigTok, CORINFO_EH_CLAUSE *clause)
 {
-    UINT pos;
+    UINT base;
+    UINT offset;
     UINT rva;
-    BYTE header[12];
+    CorILMethod_FatFormat header;
+    CorILMethod_Sect_EHTable EHTable;
     UINT hdrSize = 12;
-    USHORT *pFlags;
-    USHORT *pMaxStack;
-    UINT *pCodeSize;
-    UINT *pLocalVarSigTok;
+    UINT clauseSize;
 
     rva = PEStruct.newSectionVA + newMethodOffset;
 
     // CorILMethod_FatFormat
-    pFlags = (USHORT *)&header[0];
-    pMaxStack = (USHORT *)&header[2];
-    pCodeSize = (UINT *)&header[4];
-    pLocalVarSigTok = (UINT *)&header[8];
+    header.flags = 0x03 | 0x10 | 0x3000;
+    header.maxStack = info->maxStack;
+    header.codeSize = ILCodeSize;
+    header.localVarSigTok = localVarSigTok;
 
-    *pFlags = flags | 0x03 | 0x3000;
-    *pMaxStack = maxStack;
-    *pCodeSize = ILCodeSize;
-    *pLocalVarSigTok = localVarSigTok;
+    if (info->EHcount) {
+        header.flags |= 0x08;
+
+        clauseSize = info->EHcount * 12;
+
+        // TODO: EHTable doesn't work
+        // * Maybe need to handle alignment problem?
+        // * Or other bug?
+        // Extra header
+        EHTable.kind = 1;
+        EHTable.dataSize = 4 + clauseSize;
+        EHTable.reserved = 0;
+    }
 
     // Copy header & ILCode
-    pos = PEStruct.newSectionRaw + newMethodOffset;
+    base = PEStruct.newSectionRaw + newMethodOffset;
+    offset = 0;
 
-    memcpy(PEStruct.PEFile + pos, header, hdrSize);
-    memcpy(PEStruct.PEFile + pos + hdrSize, ILCode, ILCodeSize);
+    memcpy(PEStruct.PEFile + base + offset, &header, hdrSize);
+    offset += hdrSize;
+
+    memcpy(PEStruct.PEFile + base + offset, ILCode, ILCodeSize);
+    offset += ILCodeSize;
+
+    if (info->EHcount) {
+        memcpy(PEStruct.PEFile + base + offset, &EHTable, 4);
+        offset += 4;
+
+        memcpy(PEStruct.PEFile + base + offset, clause, clauseSize);
+        offset += clauseSize;
+
+        delete[] clause;
+    }
 
     // Done
-    newMethodOffset = newMethodOffset + hdrSize + ILCodeSize;
+    newMethodOffset = newMethodOffset + offset;
 
     return rva;
 }
@@ -202,20 +231,49 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
 /*
  * Return RVA of new method
  */
-INT createNewMethodBody(struct CORINFO_METHOD_INFO *info)
+INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *info)
 {
     uint8_t *ILCode;
     UINT ILCodeSize;
     UINT localVarSigTok;
+    CORINFO_EH_CLAUSE *clause = nullptr;
+    int validLocalVarSigTok = 0;
+    int fat = 0;
 
     ILCode = info->ILCode;
     ILCodeSize = info->ILCodeSize;
     localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x508);
 
-    if (ILCodeSize >= 1 << 6 ||
-        ((localVarSigTok >> 24) & 0xff) == 0x11) {
+    if (ILCodeSize >= 1 << 6) {
+        // The method is too large to encode the size (i.e., at least 64 bytes)
+        fat = 1;
+    } else if (((localVarSigTok >> 24) & 0xff) == 0x11) {
+        // There are local variables
+        fat = 1;
+        validLocalVarSigTok = 1;
+    }
+
+    if (info->EHcount) {
+        // There are extra data sections 
+        // Because there are exception handlers, so a extra CorILMethod_Sect_EHTable is needed
+        fat = 1;
+
+        if (!validLocalVarSigTok) {
+            localVarSigTok = 0;
+        }
+
+        logPrintf(2, "EHcount: %d\n", info->EHcount);
+
+        clause = new CORINFO_EH_CLAUSE[info->EHcount];
+
+        for (int i = 0; i < info->EHcount; ++i) {
+            getEHinfo(pCorJitInfo, info->ftn, i, &clause[i]);
+        }
+    }
+
+    if (fat) {
         // Fat format
-        return createNewMethodBodyFat(ILCode, ILCodeSize, 0x10, info->maxStack, localVarSigTok);
+        return createNewMethodBodyFat(ILCode, ILCodeSize, info, localVarSigTok, clause);
     }
 
     // Tiny format
@@ -260,10 +318,9 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
     BOOL bLoadable;
 
     hr = CLRCreateInstance(CLSID_CLRMetaHost, IID_ICLRMetaHost,
-        (LPVOID *)&pMetaHost);
+                           (LPVOID *)&pMetaHost);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] CLRCreateInstance(...) failed\n");
         return -1;
     }
@@ -271,8 +328,7 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
 
     hr = pMetaHost->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo, (VOID **)&pRuntimeInfo);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pMetaHost->GetRuntime(...) failed\n");
         return -1;
     }
@@ -280,8 +336,7 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
 
     hr = pRuntimeInfo->IsLoadable(&bLoadable);
 
-    if (FAILED(hr) || !bLoadable)
-    {
+    if (FAILED(hr) || !bLoadable) {
         logPrintf(0, "[!] pRuntimeInfo->IsLoadable(...) failed\n");
         return -1;
     }
@@ -289,8 +344,7 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
 
     hr = pRuntimeInfo->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost, (VOID **)pRuntimeHost);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pRuntimeInfo->GetInterface(...) failed\n");
         return -1;
     }
@@ -298,8 +352,7 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
 
     hr = (*pRuntimeHost)->Start();
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pRuntimeHost->Start() failed\n");
         return -1;
     }
@@ -307,9 +360,9 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
 }
 
 int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
-                  mscorlib::_AssemblyPtr *pAssembly,
-                  char *fileData,
-                  int fileLength)
+                 mscorlib::_AssemblyPtr *pAssembly,
+                 char *fileData,
+                 int fileLength)
 {
     HRESULT hr;
     IUnknownPtr pAppDomainThunk = NULL;
@@ -320,8 +373,7 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
 
     hr = pRuntimeHost->GetDefaultDomain(&pAppDomainThunk);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pRuntimeHost->GetDefaultDomain(...) failed\n");
         return -1;
     }
@@ -329,8 +381,7 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
 
     hr = pAppDomainThunk->QueryInterface(__uuidof(mscorlib::_AppDomain), (VOID **)&pDefaultAppDomain);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pAppDomainThunk->QueryInterface(...) failed\n");
         return -1;
     }
@@ -343,8 +394,7 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
 
     hr = SafeArrayAccessData(pSafeArray, &pvData);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] SafeArrayAccessData(...) failed\n");
         return -1;
     }
@@ -354,8 +404,7 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
 
     hr = SafeArrayUnaccessData(pSafeArray);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] SafeArrayUnaccessData(...) failed\n");
         return -1;
     }
@@ -363,8 +412,7 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
 
     hr = pDefaultAppDomain->Load_3(pSafeArray, &(*pAssembly));
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pDefaultAppDomain->Load_3(...) failed\n");
         return -1;
     }
@@ -385,8 +433,7 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
 
     hr = pAssembly->get_EntryPoint(&pMethodInfo);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pAssembly->get_EntryPoint(...) failed\n");
         return -1;
     }
@@ -400,8 +447,7 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     argsBound[0].lLbound = 0;
     argsBound[0].cElements = argc;
     args.parray = SafeArrayCreate(VT_BSTR, 1, argsBound);
-    for (int i = 0; i < argc; i++)
-    {
+    for (int i = 0; i < argc; i++) {
         std::wstring wc(strlen(argv[i]), L'#');
         mbstowcs(&wc[0], argv[i], strlen(argv[i]));
         idx[0] = i;
@@ -418,8 +464,7 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     // hr = 8002000E: https://github.com/etormadiv/HostingCLR/issues/4
     hr = pMethodInfo->Invoke_3(obj, params, &retVal);
 
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         logPrintf(0, "[!] pMethodInfo->Invoke_3(...) failed, hr = %X\n", hr);
         return -1;
     }
@@ -430,6 +475,29 @@ void reportNative(uint8_t **nativeEntry, uint32_t *nativeSizeOfCode)
 {
     logPrintf(1, "\t[*] Native entry: %p\n", *nativeEntry);
     logPrintf(1, "\t[*] Native size of code: %x\n", *nativeSizeOfCode);
+}
+
+static void initGetEHinfo(void **ICorJitInfo)
+{
+    /*
+     * Ref:
+     * - https://www.52pojie.cn/thread-1005018-1-1.html#27331457_jitunpacker
+     *
+     * Compiler::fgFindBasicBlocks
+     *      mov     rdi, [rsi+1AB8h]; this->info (ICorJitInfo *)
+     *      mov     rax, [rdi]      ; ICorJitInfo
+     *      mov     rbx, [rax+40h]  ; ICorJitInfo[8] (CEEJitInfo::getEHinfo)
+     *      mov     rcx, rbx
+     *      call    cs:__guard_check_icall_fptr ; JitExpandArray<ValueNumStore::VNDefFunc2Arg>::~JitExpandArray<ValueNumStore::VNDefFunc2Arg>(void)
+     *      mov     rdx, [rsi+1AD0h]
+     *      lea     r9, [rbp+clause]
+     *      mov     r8d, r12d
+     *      mov     rcx, rdi
+     *      call    rbx             ; CEEJitInfo::getEHinfo
+     */
+
+    getEHinfo = (getEHinfoFunc*)ICorJitInfo[8];
+    logPrintf(1, "[*] getEHinfo: %p\n", getEHinfo);
 }
 
 // Ref: https://github.com/dotnet/runtime/blob/4ed596ef63e60ce54cfb41d55928f0fe45f65cf3/src/coreclr/inc/corjit.h#L192
@@ -447,6 +515,10 @@ CorJitResult compileMethodHook(
     CorJitResult ret;
 
     logPrintf(1, "[*] hooking!\n");
+
+    if (!getEHinfo) {
+        initGetEHinfo(*((void ***)comp));
+    }
 
     // Check whether the hook has been edited
     if (CorJitCompiler[0] != newCompileMethod) {
@@ -468,7 +540,7 @@ CorJitResult compileMethodHook(
     // Check whether the IL has been edited
     if (info->ILCodeSize == method.methodILCodeSize) {
         int i = 0;
-        
+
         for (; i < method.methodILCodeSize; ++i) {
             if (info->ILCode[i] != method.methodILCode[i]) {
                 break;
@@ -492,7 +564,7 @@ CorJitResult compileMethodHook(
         }
 
         // Make the IL live in the new section
-        ILAddr = createNewMethodBody(info);
+        ILAddr = createNewMethodBody(comp, info);
 
         if (ILAddr < 0) {
             goto HookEnd;
@@ -503,8 +575,7 @@ CorJitResult compileMethodHook(
 
         // Modify RVA of MethodDef entry
         *method.pRVA = ILAddr;
-    }
-    else {
+    } else {
         // Modify origin IL
         memcpy(method.methodILCode, info->ILCode, info->ILCodeSize);
     }
@@ -526,8 +597,8 @@ int jitHook(void)
     BYTE *addr;
     BYTE trampoline[] = { 0x48, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rax, 0
                           0xff, 0xe0,                                                 // jmp rax
-                        };
-    
+    };
+
     // Preloading clrjit.dll
     AddDllDirectory(L"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\");
     clrjit = LoadLibraryExA("clrjit.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
@@ -558,7 +629,7 @@ int jitHook(void)
     getjit = (func *)GetProcAddress(clrjit, "getJit");
     CorJitCompiler = *(void ***)getjit();
     originCompileMethod = (compileMethodFunc *)CorJitCompiler[0];
-    
+
     VirtualProtect(&CorJitCompiler[0], 0x8, PAGE_EXECUTE_READWRITE, &old);
     CorJitCompiler[0] = newCompileMethod;
     VirtualProtect(&CorJitCompiler[0], 0x8, old, &old);
@@ -617,16 +688,12 @@ void assemblyAnalyze(void)
     BYTE *tildeStreamHdr = NULL;
     BYTE *stringsStreamHdr = NULL;
 
-    for (UINT i = 0; i < numOfStreams; ++i)
-    {
+    for (UINT i = 0; i < numOfStreams; ++i) {
         std::string rcName((char *)(streamHdr + 8));
 
-        if (rcName == "#~")
-        {
+        if (rcName == "#~") {
             tildeStreamHdr = streamHdr;
-        }
-        else if (rcName == "#Strings")
-        {
+        } else if (rcName == "#Strings") {
             stringsStreamHdr = streamHdr;
         }
         streamHdr += 0x8 + ((rcName.length() + 4) & (~0x03));
@@ -642,22 +709,18 @@ void assemblyAnalyze(void)
 
     // ECMA-335 6th II.24.2.6
     BYTE *tableStream = metadataRoot + tildeIOffset;
-    
+
     ULONGLONG maskvalid = *(ULONGLONG *)(tableStream + 8);
     ULONGLONG masksorted = *(ULONGLONG *)(tableStream + 0x10);
 
     UINT *metadataTableNums = new UINT[0x40];
     BYTE *rows = tableStream + 0x18;
 
-    for (ULONGLONG i = 0, lMaskvalid = maskvalid; lMaskvalid != 0; lMaskvalid >>= 1, i++)
-    {
-        if ((lMaskvalid & 1) == 1)
-        {
+    for (ULONGLONG i = 0, lMaskvalid = maskvalid; lMaskvalid != 0; lMaskvalid >>= 1, i++) {
+        if ((lMaskvalid & 1) == 1) {
             metadataTableNums[i] = *(UINT *)rows;
             rows += 4;
-        }
-        else
-        {
+        } else {
             metadataTableNums[i] = 0;
         }
     }
@@ -676,15 +739,13 @@ void assemblyAnalyze(void)
 
     tables[0] = rows;
 
-    for (ULONG i = 1; i < 7; ++i)
-    {
+    for (ULONG i = 1; i < 7; ++i) {
         tables[i] = tables[i - 1] + metadataTableNums[i - 1] * metadataTableSizes[i - 1];
     }
 
     BYTE *methodTable = tables[6];
 
-    for (UINT i = 0; i < metadataTableNums[6]; ++i, methodTable += 0xe)
-    {
+    for (UINT i = 0; i < metadataTableNums[6]; ++i, methodTable += 0xe) {
         BYTE *code;
         UINT codesize;
         int format;
@@ -706,14 +767,11 @@ void assemblyAnalyze(void)
 
         format = *header & 1;
 
-        if (format == 1)
-        {
+        if (format == 1) {
             // CorILMethod_FatFormat
             codesize = *(UINT *)(header + 4);
             code = header + 12;
-        }
-        else
-        {
+        } else {
             // CorILMethod_TinyFormat
             codesize = *header >> 2;
             code = header + 1;
@@ -745,9 +803,9 @@ int main(int argc, char *argv[])
     assemblyAnalyze();
 
     if (assemblyLoad(pRuntimeHost,
-                     (mscorlib::_AssemblyPtr *)&pAssembly,
-                     (char *)PEStruct.PEFile,
-                     PEStruct.PEFileLength) < 0) {
+        (mscorlib::_AssemblyPtr *)&pAssembly,
+        (char *)PEStruct.PEFile,
+        PEStruct.PEFileLength) < 0) {
         exit(1);
     }
 

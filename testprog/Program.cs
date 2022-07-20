@@ -16,9 +16,15 @@ namespace testprog
          * - No extra data sections
          * - The operand stack shall be no bigger than 8 entries
          */
-        static void tinyFunc()
+        static void tinyFunc1()
         {
             ga = ga + gb;
+        }
+
+        // The "No exceptions" condition actually means "No exception handlers"
+        static void tinyFunc2()
+        {
+            throw new Exception("tinyFunc2");
         }
 
         // The method is too large to encode the size (i.e., at least 64 bytes)
@@ -45,30 +51,77 @@ namespace testprog
             ret = c + d;
 
             return ret;
-        }
+        }        
 
-        // There are exceptions
+        // There are extra data sections 
+        // Because there are exception handlers, so a extra CorILMethod_Sect_EHTable is needed
         static int fatFunc4(int a)
-        {
-            if (a == 0)
-            {
-                throw new Exception("a = 0");
-            }
-            return a + 1;
-        }
-
-        // There are exceptions
-        static int fatFunc5(int a)
         {
             try
             {
-                return fatFunc4(a) + 1;
+                tinyFunc2();
+                return a;
             }
             catch
             {
                 throw;
             }
         }
+
+        // There are extra data sections 
+        // Because there are exception handlers, so a extra CorILMethod_Sect_EHTable is needed
+        static int fatFunc5(int a)
+        {
+            try
+            {
+                return fatFunc4(a) + 1;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("In fatFunc5: " + ex.Message);
+                throw;
+            }
+        }
+
+        // There are extra data sections 
+        // Because there are exception handlers, so a extra CorILMethod_Sect_EHTable is needed
+        static void fatFunc6()
+        {
+            try
+            {
+                ga = ga / gb;
+            }
+            catch
+            {
+                ga = ga + gb;
+            }
+        }
+
+        static int fatFunc7(int a, int b, int c)
+        {
+            try
+            {
+                try
+                {
+                    a = b / c;
+                }
+                catch
+                {
+                    Console.WriteLine("In fatFunc7: c == 0");
+                    return a;
+                }
+
+                a = c / b;
+                return a;
+            }
+            catch
+            {
+                Console.WriteLine("In fatFunc7: b == 0");
+            }
+
+            return a;
+        }
+
         static void Main(string[] args)
         {
             Console.WriteLine("Test program, press any key to continue");
@@ -79,52 +132,77 @@ namespace testprog
             ga = 1;
             gb = 2;
 
-            Console.WriteLine("Test tiny function");
-            tinyFunc();
+            Console.WriteLine("Test tinyFunc1");
+            tinyFunc1();
             ret = ga;
             // 3
             Console.WriteLine("ret: " + ret.ToString());
 
-            Console.WriteLine("Test fat function1 (The method is too large to encode the size)");
+            Console.WriteLine("Test fatFunc1 (The method is too large to encode the size)");
             ret = fatFunc1(3, 4);
             // 140
             Console.WriteLine("ret: " + ret.ToString());
 
-            Console.WriteLine("Test fat function2 (There are local variables)");
+            Console.WriteLine("Test fatFunc2 (There are local variables)");
             ret = fatFunc2(5, 6);
             // 11
             Console.WriteLine("ret: " + ret.ToString());
 
-            Console.WriteLine("Test fat function3 (There are local variables with different name)");
+            Console.WriteLine("Test fatFunc3 (There are local variables with different name)");
             ret = fatFunc3(7, 8);
             // 15
             Console.WriteLine("ret: " + ret.ToString());
 
-            Console.WriteLine("Test fat function2 again");
+            Console.WriteLine("Test fatFunc2 again");
             ret = fatFunc2(5, 6);
             // 11
             Console.WriteLine("ret: " + ret.ToString());
 
             try
             {
-                Console.WriteLine("Test fat function4 (There are exceptions)");
-                ret = fatFunc4(0);
-                Console.WriteLine("ret: " + ret.ToString());
+                Console.WriteLine("Test tinyFunc2 (Throw a exception)");
+                tinyFunc2();
             } catch (Exception ex)
             {
-                Console.WriteLine("Function4 exception: " + ex.Message);
+                Console.WriteLine("tinyFunc2 exception: " + ex.Message);
             }
 
             try
             {
-                Console.WriteLine("Test fat function5 (There are exceptions)");
+                Console.WriteLine("Test fatFunc4 (There are exception handlers)");
+                ret = fatFunc4(0);
+                Console.WriteLine("ret: " + ret.ToString());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("fatFunc4 exception: " + ex.Message);
+            }
+
+            try
+            {
+                Console.WriteLine("Test fatFunc5 (There are exception handlers)");
                 ret = fatFunc5(0);
                 Console.WriteLine("ret: " + ret.ToString());
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Function5 exception: " + ex.Message);
+                Console.WriteLine("fatFunc5 exception: " + ex.Message);
             }
+
+            try
+            {
+                Console.WriteLine("Test fatFunc6");
+                fatFunc6();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("fatFunc6 exception: " + ex.Message);
+            }
+
+            Console.WriteLine("Test fatFunc7");
+            ret = fatFunc7(4, 0, 2);
+            // 0
+            Console.WriteLine("ret: " + ret.ToString());
         }
     }
 }

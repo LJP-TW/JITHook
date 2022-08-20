@@ -242,7 +242,13 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
 
     ILCode = info->ILCode;
     ILCodeSize = info->ILCodeSize;
-    localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x508);
+    // TODO: Offset is different
+    // localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x508);
+    localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x520);
+
+    logPrintf(0, "info: %p\n", info);
+    logPrintf(0, "localVarSigTok: %#x\n", localVarSigTok);
+    PAUSE();
 
     if (ILCodeSize >= 1 << 6) {
         // The method is too large to encode the size (i.e., at least 64 bytes)

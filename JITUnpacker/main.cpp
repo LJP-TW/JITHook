@@ -27,7 +27,7 @@
 #define PAUSE() do { logPrintf(0, "PAUSE\n"); scanf("%*c"); } while(0)
 
 // auto_rename: https://stackoverflow.com/questions/55117881/load-c-sharp-assembly-in-c-c-mscoree-tlh-errors
-#import "C:\Windows\Microsoft.NET\Framework\v4.0.30319\mscorlib.tlb" raw_interfaces_only auto_rename
+#import "mscorlib.tlb" auto_rename
 
 #define ALIGN(num, base) (((UINT64)num + base - 1) & ~(base - 1))
 
@@ -410,7 +410,7 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
     }
     logPrintf(1, "[+] SafeArrayUnaccessData(...) succeeded\n");
 
-    hr = pDefaultAppDomain->Load_3(pSafeArray, &(*pAssembly));
+    hr = pDefaultAppDomain->raw_Load_3(pSafeArray, &(*pAssembly));
 
     if (FAILED(hr)) {
         logPrintf(0, "[!] pDefaultAppDomain->Load_3(...) failed\n");
@@ -462,7 +462,7 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     PAUSE();
 
     // hr = 8002000E: https://github.com/etormadiv/HostingCLR/issues/4
-    hr = pMethodInfo->Invoke_3(obj, params, &retVal);
+    hr = pMethodInfo->raw_Invoke_3(obj, params, &retVal);
 
     if (FAILED(hr)) {
         logPrintf(0, "[!] pMethodInfo->Invoke_3(...) failed, hr = %X\n", hr);

@@ -212,6 +212,7 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
     CorILMethod_Sect_EHTable EHTable;
     UINT hdrSize = 12;
     UINT clauseSize;
+    CORINFO_EH_CLAUSE_TINY *tinyclause = nullptr;
 
     rva = PEStruct.newSectionVA + newMethodOffset;
 
@@ -226,13 +227,32 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
 
         clauseSize = info->EHcount * 12;
 
-        // TODO: EHTable doesn't work
-        // * Maybe need to handle alignment problem?
-        // * Or other bug?
-        // Extra header
+        // TODO: Some EHTable doesn't work
         EHTable.kind = 1;
         EHTable.dataSize = 4 + clauseSize;
         EHTable.reserved = 0;
+
+        tinyclause = new CORINFO_EH_CLAUSE_TINY[info->EHcount];
+
+        for (int i = 0; i < info->EHcount; ++i) {
+            tinyclause[i].Flags = clause[i].Flags;
+            tinyclause[i].TryOffset = clause[i].TryOffset;
+            tinyclause[i].TryLength = clause[i].TryLength;
+            tinyclause[i].HandlerOffset = clause[i].HandlerOffset;
+            tinyclause[i].HandlerLength = clause[i].HandlerLength;
+            tinyclause[i].ClassToken = clause[i].ClassToken;
+
+
+            logPrintf(0, "CORINFO_EH_CLAUSE: %p\n", tinyclause);
+            logPrintf(0, "Flags     : %#x\n", clause[i].Flags);
+            logPrintf(0, "TryOffset : %#x\n", clause[i].TryOffset);
+            logPrintf(0, "TryLength : %#x\n", clause[i].TryLength);
+            logPrintf(0, "HdlOffset : %#x\n", clause[i].HandlerOffset);
+            logPrintf(0, "HdlLength : %#x\n", clause[i].HandlerLength);
+            logPrintf(0, "Token     : %#x\n", clause[i].ClassToken);
+        }
+
+        delete[] clause;
     }
 
     // Copy header & ILCode
@@ -246,13 +266,23 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
     offset += ILCodeSize;
 
     if (info->EHcount) {
+        // Align 4-byte
+        int padding;
+
+        padding = 4 - offset % 4;
+
+        memset(PEStruct.PEFile + base + offset, 0, padding);
+        offset += padding;
+
         memcpy(PEStruct.PEFile + base + offset, &EHTable, 4);
         offset += 4;
 
-        memcpy(PEStruct.PEFile + base + offset, clause, clauseSize);
+        memcpy(PEStruct.PEFile + base + offset, tinyclause, clauseSize);
         offset += clauseSize;
 
-        delete[] clause;
+        PAUSE();
+
+        delete[] tinyclause;
     }
 
     // Done
@@ -304,6 +334,14 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
 
         for (int i = 0; i < info->EHcount; ++i) {
             getEHinfo(pCorJitInfo, info->ftn, i, &clause[i]);
+
+            logPrintf(3, "CORINFO_EH_CLAUSE:\n");
+            logPrintf(3, "Flags     : %#x\n", clause[i].Flags);
+            logPrintf(3, "TryOffset : %#x\n", clause[i].TryOffset);
+            logPrintf(3, "TryLength : %#x\n", clause[i].TryLength);
+            logPrintf(3, "HdlOffset : %#x\n", clause[i].HandlerOffset);
+            logPrintf(3, "HdlLength : %#x\n", clause[i].HandlerLength);
+            logPrintf(3, "Token     : %#x\n", clause[i].ClassToken);
         }
     }
 

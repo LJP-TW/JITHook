@@ -87,6 +87,7 @@ enum CORINFO_EH_CLAUSE_FLAGS
     CORINFO_EH_CLAUSE_SAMETRY   = 0x0010,     // This clause covers same try block as the previous one. (Used by NativeAOT ABI.)
 };
 
+// The layout of the fat form of exception handling clauses
 struct CORINFO_EH_CLAUSE
 {
     CORINFO_EH_CLAUSE_FLAGS     Flags;
@@ -100,6 +101,25 @@ struct CORINFO_EH_CLAUSE
         uint32_t                FilterOffset;     // use for filter-based exception handlers (COR_ILEXCEPTION_FILTER is set)
     };
 };
+
+// The small form of the exception clause should be used whenever the code sizes for the try block and
+// the handler code are both smaller than 256 bytes and both their offsets are smaller than 65536. The
+// format for a small exception clause is as follows
+#pragma pack(push, 1)
+struct CORINFO_EH_CLAUSE_TINY
+{
+    uint16_t                    Flags; // CORINFO_EH_CLAUSE_FLAGS
+    uint16_t                    TryOffset;
+    uint8_t                     TryLength;
+    uint16_t                    HandlerOffset;
+    uint8_t                     HandlerLength;
+    union
+    {
+        uint32_t                ClassToken;
+        uint32_t                FilterOffset;
+    };
+};
+#pragma pack(pop)
 
 typedef void (getEHinfoFunc)(
     ICorJitInfo            *thisptr,

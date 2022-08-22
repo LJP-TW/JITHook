@@ -37,6 +37,7 @@ void **CorJitCompiler;
 compileMethodFunc *originCompileMethod;
 getEHinfoFunc *getEHinfo;
 void *newCompileMethod;
+int localVarSigTokOffset;
 
 struct PEStruct_t
 {
@@ -76,6 +77,36 @@ struct PESection_t
     USHORT     nLN;
     UINT       characteristics;
 };
+
+void init(void)
+{
+    NTSTATUS(WINAPI *RtlGetVersion)(LPOSVERSIONINFOEXW);
+    OSVERSIONINFOEXW osInfo;
+
+    *(FARPROC *)&RtlGetVersion = GetProcAddress(GetModuleHandleA("ntdll"), "RtlGetVersion");
+
+    if (RtlGetVersion == NULL) {
+        logPrintf(0, "RtlGetVersion not found\n");
+        exit(1);
+    }
+
+    osInfo.dwOSVersionInfoSize = sizeof(osInfo);
+    RtlGetVersion(&osInfo);
+
+    logPrintf(3, "Windows version:\n");
+    logPrintf(3, "Major: %d\n", osInfo.dwMajorVersion);
+    logPrintf(3, "Minor: %d\n", osInfo.dwMinorVersion);
+    logPrintf(3, "Build: %d\n", osInfo.dwBuildNumber);
+
+    if (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber == 19043) {
+        localVarSigTokOffset = 0x520;
+    } else if (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber == 19044) {
+        localVarSigTokOffset = 0x508;
+    } else {
+        localVarSigTokOffset = 0x508;
+        logPrintf(0, "[!] OS version is not currently supported and may have bugs\n");
+    }
+}
 
 /*
  * Parse Method table stream of "#~" Stream
@@ -244,13 +275,10 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
 
     ILCode = info->ILCode;
     ILCodeSize = info->ILCodeSize;
-    // TODO: Offset is different
-    // localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x508);
-    localVarSigTok = *(DWORD *)(((BYTE *)info) + 0x520);
+    localVarSigTok = *(DWORD *)(((BYTE *)info) + localVarSigTokOffset);
 
-    logPrintf(0, "info: %p\n", info);
-    logPrintf(0, "localVarSigTok: %#x\n", localVarSigTok);
-    PAUSE();
+    logPrintf(3, "info: %p\n", info);
+    logPrintf(3, "localVarSigTok: %#x\n", localVarSigTok);
 
     if (ILCodeSize >= 1 << 6) {
         // The method is too large to encode the size (i.e., at least 64 bytes)
@@ -797,6 +825,8 @@ int main(int argc, char *argv[])
 {
     ICorRuntimeHost *pRuntimeHost = NULL; // Alternative: ICLRRuntimeHost
     mscorlib::_AssemblyPtr pAssembly = NULL;
+
+    init();
 
     parseArg(argc, argv);
 

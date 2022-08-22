@@ -99,8 +99,10 @@ void createNewSection(void)
 
     BYTE *ntHdr = newPEFile + *(UINT *)(newPEFile + 0x3c);
     USHORT *sectionCnt = (USHORT *)(ntHdr + 0x6);
+    UINT *imageSize = (UINT *)(ntHdr + 0x50);
 
     *sectionCnt = *sectionCnt + 1;
+    *imageSize = *imageSize + newSectionSize;
 
     sectionHdr = newPEFile + PEStruct.sectionHdrOffset;
 
@@ -128,9 +130,9 @@ void createNewSection(void)
     newSection->nReloc = 0;
     newSection->nLN = 0;
     newSection->VA = newSectionVA;
-    newSection->VASize = 0x1000;
+    newSection->VASize = newSectionSize;
     newSection->raw = newRaw;
-    newSection->rawSize = 0x1000;
+    newSection->rawSize = newSectionSize;
 
     delete[] PEStruct.PEFile;
     PEStruct.PEFile = newPEFile;

@@ -152,8 +152,6 @@ void createNewSection(void)
 
     // TODO: There may not be enough space to create a new section header
     // TODO: Set characteristics of section
-    // TODO: Adjust VASize
-    // TODO: Adjust size of image
     newSection = (PESection_t *)sectionCur;
     memcpy(newSection->name, ".ljp", 5);
     newSection->ptrReloc = NULL;
@@ -227,7 +225,6 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
 
         clauseSize = info->EHcount * 12;
 
-        // TODO: Some EHTable doesn't work
         EHTable.kind = 1;
         EHTable.dataSize = 4 + clauseSize;
         EHTable.reserved = 0;

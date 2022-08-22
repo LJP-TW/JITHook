@@ -311,13 +311,13 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
     logPrintf(3, "info: %p\n", info);
     logPrintf(3, "localVarSigTok: %#x\n", localVarSigTok);
 
-    if (ILCodeSize >= 1 << 6) {
-        // The method is too large to encode the size (i.e., at least 64 bytes)
-        fat = 1;
-    } else if (((localVarSigTok >> 24) & 0xff) == 0x11) {
+    if (((localVarSigTok >> 24) & 0xff) == 0x11) {
         // There are local variables
         fat = 1;
         validLocalVarSigTok = 1;
+    } else if (ILCodeSize >= 1 << 6) {
+        // The method is too large to encode the size (i.e., at least 64 bytes)
+        fat = 1;
     }
 
     if (info->EHcount) {

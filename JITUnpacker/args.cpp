@@ -2,11 +2,13 @@
 #include <vector>
 #include <string>
 
+#include "log.h"
+
 // Default target dotnet exe
 #define PACKED_ASSEMBLY_NAME "JIThook.exe"
 
 // Arguments
-int argVerboseLevel;
+int argVerboseLevel = LOG_LEVEL_INFO;
 std::string argFilename;
 
 void parseArg(int argc, char *argv[])

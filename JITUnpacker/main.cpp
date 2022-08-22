@@ -24,7 +24,7 @@
 #include "corjit.h"
 #include "log.h"
 
-#define PAUSE() do { logPrintf(0, "PAUSE\n"); scanf("%*c"); } while(0)
+#define PAUSE() do { logPrintf(LOG_LEVEL_INFO, "[*] PAUSE\n"); scanf("%*c"); } while(0)
 
 // auto_rename: https://stackoverflow.com/questions/55117881/load-c-sharp-assembly-in-c-c-mscoree-tlh-errors
 #import "mscorlib.tlb" auto_rename
@@ -86,17 +86,17 @@ void init(void)
     *(FARPROC *)&RtlGetVersion = GetProcAddress(GetModuleHandleA("ntdll"), "RtlGetVersion");
 
     if (RtlGetVersion == NULL) {
-        logPrintf(0, "RtlGetVersion not found\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] RtlGetVersion not found\n");
         exit(1);
     }
 
     osInfo.dwOSVersionInfoSize = sizeof(osInfo);
     RtlGetVersion(&osInfo);
 
-    logPrintf(3, "Windows version:\n");
-    logPrintf(3, "Major: %d\n", osInfo.dwMajorVersion);
-    logPrintf(3, "Minor: %d\n", osInfo.dwMinorVersion);
-    logPrintf(3, "Build: %d\n", osInfo.dwBuildNumber);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Windows version:\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Major: %d\n", osInfo.dwMajorVersion);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Minor: %d\n", osInfo.dwMinorVersion);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Build: %d\n", osInfo.dwBuildNumber);
 
     if (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber == 19043) {
         localVarSigTokOffset = 0x520;
@@ -104,7 +104,7 @@ void init(void)
         localVarSigTokOffset = 0x508;
     } else {
         localVarSigTokOffset = 0x508;
-        logPrintf(0, "[!] OS version is not currently supported and may have bugs\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] OS version is not currently supported and may have bugs\n");
     }
 }
 
@@ -241,14 +241,6 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
             tinyclause[i].HandlerOffset = clause[i].HandlerOffset;
             tinyclause[i].HandlerLength = clause[i].HandlerLength;
             tinyclause[i].ClassToken = clause[i].ClassToken;
-
-            logPrintf(0, "CORINFO_EH_CLAUSE: %p\n", tinyclause);
-            logPrintf(0, "Flags     : %#x\n", clause[i].Flags);
-            logPrintf(0, "TryOffset : %#x\n", clause[i].TryOffset);
-            logPrintf(0, "TryLength : %#x\n", clause[i].TryLength);
-            logPrintf(0, "HdlOffset : %#x\n", clause[i].HandlerOffset);
-            logPrintf(0, "HdlLength : %#x\n", clause[i].HandlerLength);
-            logPrintf(0, "Token     : %#x\n", clause[i].ClassToken);
         }
 
         delete[] clause;
@@ -281,8 +273,6 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
         memcpy(PEStruct.PEFile + base + offset, tinyclause, clauseSize);
         offset += clauseSize;
 
-        PAUSE();
-
         delete[] tinyclause;
     }
 
@@ -308,8 +298,8 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
     ILCodeSize = info->ILCodeSize;
     localVarSigTok = *(DWORD *)(((BYTE *)info) + localVarSigTokOffset);
 
-    logPrintf(3, "info: %p\n", info);
-    logPrintf(3, "localVarSigTok: %#x\n", localVarSigTok);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] info: %p\n", info);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] localVarSigTok: %#x\n", localVarSigTok);
 
     if (((localVarSigTok >> 24) & 0xff) == 0x11) {
         // There are local variables
@@ -329,20 +319,20 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
             localVarSigTok = 0;
         }
 
-        logPrintf(2, "EHcount: %d\n", info->EHcount);
+        logPrintf(LOG_LEVEL_DEBUG, "[*] EHcount: %d\n", info->EHcount);
 
         clause = new CORINFO_EH_CLAUSE[info->EHcount];
 
         for (int i = 0; i < info->EHcount; ++i) {
             getEHinfo(pCorJitInfo, info->ftn, i, &clause[i]);
 
-            logPrintf(3, "CORINFO_EH_CLAUSE:\n");
-            logPrintf(3, "Flags     : %#x\n", clause[i].Flags);
-            logPrintf(3, "TryOffset : %#x\n", clause[i].TryOffset);
-            logPrintf(3, "TryLength : %#x\n", clause[i].TryLength);
-            logPrintf(3, "HdlOffset : %#x\n", clause[i].HandlerOffset);
-            logPrintf(3, "HdlLength : %#x\n", clause[i].HandlerLength);
-            logPrintf(3, "Token     : %#x\n", clause[i].ClassToken);
+            logPrintf(LOG_LEVEL_DEBUG, "[*] CORINFO_EH_CLAUSE:\n");
+            logPrintf(LOG_LEVEL_DEBUG, "[*] Flags     : %#x\n", clause[i].Flags);
+            logPrintf(LOG_LEVEL_DEBUG, "[*] TryOffset : %#x\n", clause[i].TryOffset);
+            logPrintf(LOG_LEVEL_DEBUG, "[*] TryLength : %#x\n", clause[i].TryLength);
+            logPrintf(LOG_LEVEL_DEBUG, "[*] HdlOffset : %#x\n", clause[i].HandlerOffset);
+            logPrintf(LOG_LEVEL_DEBUG, "[*] HdlLength : %#x\n", clause[i].HandlerLength);
+            logPrintf(LOG_LEVEL_DEBUG, "[*] Token     : %#x\n", clause[i].ClassToken);
         }
     }
 
@@ -371,8 +361,8 @@ void openPackedFile(const char *filename)
 
     target.close();
 
-    logPrintf(1, "[*] file: %s\n", filename);
-    logPrintf(1, "[*] file length: %d\n", PEStruct.PEFileLength);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] file: %s\n", filename);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] file length: %d\n", PEStruct.PEFileLength);
 }
 
 void saveFile(void)
@@ -382,7 +372,7 @@ void saveFile(void)
     target.write((char *)PEStruct.PEFile, PEStruct.PEFileLength);
     target.close();
 
-    logPrintf(0, "[*] Checkout output.exe_\n");
+    logPrintf(LOG_LEVEL_INFO, "[*] Checkout output.exe_\n");
 }
 
 int clrHost(ICorRuntimeHost **pRuntimeHost)
@@ -396,42 +386,42 @@ int clrHost(ICorRuntimeHost **pRuntimeHost)
                            (LPVOID *)&pMetaHost);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] CLRCreateInstance(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] CLRCreateInstance(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] CLRCreateInstance(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] CLRCreateInstance(...) succeeded\n");
 
     hr = pMetaHost->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo, (VOID **)&pRuntimeInfo);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pMetaHost->GetRuntime(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pMetaHost->GetRuntime(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pMetaHost->GetRuntime(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pMetaHost->GetRuntime(...) succeeded\n");
 
     hr = pRuntimeInfo->IsLoadable(&bLoadable);
 
     if (FAILED(hr) || !bLoadable) {
-        logPrintf(0, "[!] pRuntimeInfo->IsLoadable(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pRuntimeInfo->IsLoadable(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pRuntimeInfo->IsLoadable(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pRuntimeInfo->IsLoadable(...) succeeded\n");
 
     hr = pRuntimeInfo->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost, (VOID **)pRuntimeHost);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pRuntimeInfo->GetInterface(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pRuntimeInfo->GetInterface(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pRuntimeInfo->GetInterface(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pRuntimeInfo->GetInterface(...) succeeded\n");
 
     hr = (*pRuntimeHost)->Start();
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pRuntimeHost->Start() failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pRuntimeHost->Start() failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pRuntimeHost->Start() succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pRuntimeHost->Start() succeeded\n");
 }
 
 int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
@@ -449,18 +439,18 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
     hr = pRuntimeHost->GetDefaultDomain(&pAppDomainThunk);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pRuntimeHost->GetDefaultDomain(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pRuntimeHost->GetDefaultDomain(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pRuntimeHost->GetDefaultDomain(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pRuntimeHost->GetDefaultDomain(...) succeeded\n");
 
     hr = pAppDomainThunk->QueryInterface(__uuidof(mscorlib::_AppDomain), (VOID **)&pDefaultAppDomain);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pAppDomainThunk->QueryInterface(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pAppDomainThunk->QueryInterface(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pAppDomainThunk->QueryInterface(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pAppDomainThunk->QueryInterface(...) succeeded\n");
 
     rgsabound[0].cElements = fileLength;
     rgsabound[0].lLbound = 0;
@@ -470,28 +460,28 @@ int assemblyLoad(ICorRuntimeHost *pRuntimeHost,
     hr = SafeArrayAccessData(pSafeArray, &pvData);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] SafeArrayAccessData(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] SafeArrayAccessData(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] SafeArrayAccessData(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] SafeArrayAccessData(...) succeeded\n");
 
     memcpy(pvData, fileData, fileLength);
 
     hr = SafeArrayUnaccessData(pSafeArray);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] SafeArrayUnaccessData(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] SafeArrayUnaccessData(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] SafeArrayUnaccessData(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] SafeArrayUnaccessData(...) succeeded\n");
 
     hr = pDefaultAppDomain->raw_Load_3(pSafeArray, &(*pAssembly));
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pDefaultAppDomain->Load_3(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pDefaultAppDomain->Load_3(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pDefaultAppDomain->Load_3(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pDefaultAppDomain->Load_3(...) succeeded\n");
 }
 
 int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
@@ -509,10 +499,10 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     hr = pAssembly->get_EntryPoint(&pMethodInfo);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pAssembly->get_EntryPoint(...) failed\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] pAssembly->get_EntryPoint(...) failed\n");
         return -1;
     }
-    logPrintf(1, "[+] pAssembly->get_EntryPoint(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pAssembly->get_EntryPoint(...) succeeded\n");
 
     ZeroMemory(&retVal, sizeof(VARIANT));
     ZeroMemory(&obj, sizeof(VARIANT));
@@ -534,22 +524,23 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     idx[0] = 0;
     SafeArrayPutElement(params, idx, &args);
 
+    logPrintf(LOG_LEVEL_INFO, "[*] Press any key to run .NET assembly\n");
     PAUSE();
 
     // hr = 8002000E: https://github.com/etormadiv/HostingCLR/issues/4
     hr = pMethodInfo->raw_Invoke_3(obj, params, &retVal);
 
     if (FAILED(hr)) {
-        logPrintf(0, "[!] pMethodInfo->Invoke_3(...) failed, hr = %X\n", hr);
+        logPrintf(LOG_LEVEL_ERR, "[!] pMethodInfo->Invoke_3(...) failed, hr = %X\n", hr);
         return -1;
     }
-    logPrintf(1, "[+] pMethodInfo->Invoke_3(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pMethodInfo->Invoke_3(...) succeeded\n");
 }
 
 void reportNative(uint8_t **nativeEntry, uint32_t *nativeSizeOfCode)
 {
-    logPrintf(1, "\t[*] Native entry: %p\n", *nativeEntry);
-    logPrintf(1, "\t[*] Native size of code: %x\n", *nativeSizeOfCode);
+    logPrintf(LOG_LEVEL_DEBUG, "\t[*] Native entry: %p\n", *nativeEntry);
+    logPrintf(LOG_LEVEL_DEBUG, "\t[*] Native size of code: %x\n", *nativeSizeOfCode);
 }
 
 static void initGetEHinfo(void **ICorJitInfo)
@@ -572,7 +563,7 @@ static void initGetEHinfo(void **ICorJitInfo)
      */
 
     getEHinfo = (getEHinfoFunc*)ICorJitInfo[8];
-    logPrintf(1, "[*] getEHinfo: %p\n", getEHinfo);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] getEHinfo: %p\n", getEHinfo);
 }
 
 // Ref: https://github.com/dotnet/runtime/blob/4ed596ef63e60ce54cfb41d55928f0fe45f65cf3/src/coreclr/inc/corjit.h#L192
@@ -589,7 +580,7 @@ CorJitResult compileMethodHook(
     methodDefInfo method;
     CorJitResult ret;
 
-    logPrintf(1, "[*] hooking!\n");
+    logPrintf(LOG_LEVEL_INFO, "[*] hooking!\n");
 
     if (!getEHinfo) {
         initGetEHinfo(*((void ***)comp));
@@ -597,7 +588,7 @@ CorJitResult compileMethodHook(
 
     // Check whether the hook has been edited
     if (CorJitCompiler[0] != newCompileMethod) {
-        logPrintf(0, "[*] Hook has been edited!\n");
+        logPrintf(LOG_LEVEL_WARNING, "[+] Hook has been edited!\n");
     }
 
     // Get the info of module
@@ -609,8 +600,8 @@ CorJitResult compileMethodHook(
 
     method = methodMap[token];
 
-    logPrintf(1, "\t[*] Token: %x\n", token);
-    logPrintf(1, "\t[*] Name: %s\n", method.methodName.c_str());
+    logPrintf(LOG_LEVEL_INFO, "\t[*] Token: %x\n", token);
+    logPrintf(LOG_LEVEL_INFO, "\t[*] Name: %s\n", method.methodName.c_str());
 
     // Check whether the IL has been edited
     if (info->ILCodeSize == method.methodILCodeSize) {
@@ -628,7 +619,7 @@ CorJitResult compileMethodHook(
     }
 
     // IL has been edited, update it
-    logPrintf(0, "\t[!] IL has been edited!\n");
+    logPrintf(LOG_LEVEL_WARNING, "\t[+] IL has been edited!\n");
 
     if (info->ILCodeSize > method.methodILCodeSize) {
         INT ILAddr;
@@ -678,14 +669,14 @@ int jitHook(void)
     AddDllDirectory(L"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\");
     clrjit = LoadLibraryExA("clrjit.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
     if (clrjit == NULL) {
-        logPrintf(0, "[x] Failed to load clrjit.dll\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] Failed to load clrjit.dll\n");
         exit(1);
     }
-    logPrintf(1, "[*] Load clrjit.dll\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Load clrjit.dll\n");
 
     // Write trampoline
     addr = (BYTE *)clrjit + 0x40;
-    logPrintf(1, "[*] Write trampoline to address %p\n", addr);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Write trampoline to address %p\n", addr);
 
     compileMethodHookIAddr = (UINT64)compileMethodHook;
     for (int i = 0; i < 8; ++i) {
@@ -709,13 +700,13 @@ int jitHook(void)
     CorJitCompiler[0] = newCompileMethod;
     VirtualProtect(&CorJitCompiler[0], 0x8, old, &old);
 
-    logPrintf(1, "[*] Hook compileMethod\n");
-    logPrintf(1, "[*] originCompileMethod: %p\n", originCompileMethod);
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Hook compileMethod\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] originCompileMethod: %p\n", originCompileMethod);
 }
 
 void assemblyAnalyze(void)
 {
-    logPrintf(2, "[*] Analyze assembly\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] Analyze assembly\n");
 
     BYTE *baseaddr = PEStruct.PEFile;
     BYTE *ntHdr = baseaddr + *(UINT *)(baseaddr + 0x3c);
@@ -725,7 +716,7 @@ void assemblyAnalyze(void)
     USHORT magic = *(USHORT *)optionalHdr;
 
     if (magic != 0x20b) {
-        logPrintf(0, "[!] Only support 64-bit program\n");
+        logPrintf(LOG_LEVEL_ERR, "[!] Only support 64-bit program\n");
         exit(1);
     }
 
@@ -831,8 +822,8 @@ void assemblyAnalyze(void)
         std::string name((char *)(stringsStream + nameIdx));
         UINT token = 0x06000000 + i + 1;
 
-        logPrintf(2, "\t[*] Method: %s\n", name.c_str());
-        logPrintf(2, "\t\t[*] token: %x\n", token);
+        logPrintf(LOG_LEVEL_DEBUG, "\t[*] Method: %s\n", name.c_str());
+        logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] token: %x\n", token);
 
         if (!*prva) {
             continue;
@@ -852,9 +843,9 @@ void assemblyAnalyze(void)
             code = header + 1;
         }
 
-        logPrintf(2, "\t\t[*] rva: %x\n", *prva);
-        logPrintf(2, "\t\t[*] IL code size: %#x\n", codesize);
-        logPrintf(2, "\t\t[*] IL code: %p\n", code);
+        logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] rva: %x\n", *prva);
+        logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] IL code size: %#x\n", codesize);
+        logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] IL code: %p\n", code);
 
         methodMap[token] = { prva, name, header, code, codesize };
     }
@@ -892,7 +883,7 @@ int main(int argc, char *argv[])
 
     saveFile();
 
-    logPrintf(0, "[*] CLRHosting Terminated\n");
+    logPrintf(LOG_LEVEL_INFO, "[*] CLRHosting Terminated\n");
 
     return 0;
 }

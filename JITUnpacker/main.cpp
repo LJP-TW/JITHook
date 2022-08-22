@@ -151,7 +151,6 @@ void createNewSection(void)
     }
 
     // TODO: There may not be enough space to create a new section header
-    // TODO: Set characteristics of section
     newSection = (PESection_t *)sectionCur;
     memcpy(newSection->name, ".ljp", 5);
     newSection->ptrReloc = NULL;
@@ -162,6 +161,7 @@ void createNewSection(void)
     newSection->VASize = newSectionSize;
     newSection->raw = newRaw;
     newSection->rawSize = newSectionSize;
+    newSection->characteristics = 0x60000020;
 
     delete[] PEStruct.PEFile;
     PEStruct.PEFile = newPEFile;

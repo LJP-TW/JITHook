@@ -242,7 +242,6 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
             tinyclause[i].HandlerLength = clause[i].HandlerLength;
             tinyclause[i].ClassToken = clause[i].ClassToken;
 
-
             logPrintf(0, "CORINFO_EH_CLAUSE: %p\n", tinyclause);
             logPrintf(0, "Flags     : %#x\n", clause[i].Flags);
             logPrintf(0, "TryOffset : %#x\n", clause[i].TryOffset);
@@ -267,9 +266,11 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
 
     if (info->EHcount) {
         // Align 4-byte
-        int padding;
+        int padding = 0;
 
-        padding = 4 - offset % 4;
+        if (ILCodeSize % 4) {
+            padding = 4 - ILCodeSize % 4;
+        }
 
         memset(PEStruct.PEFile + base + offset, 0, padding);
         offset += padding;

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -20,7 +21,7 @@ namespace Packer
     {
         static void entry()
         {
-            Console.WriteLine("ljpacker entry");
+            Console.WriteLine("packer entry");
         }
     }
     class Program
@@ -29,29 +30,33 @@ namespace Packer
         static ModuleDefMD module;
         static IPEImage PEImage;
         static DataReader reader;
+        static OpCode nonsense;
 
         static void packMethod(TypeDef type, MethodDef method)
         {
+            uint offset = ((uint)PEImage.ToFileOffset(method.RVA)) + method.Body.HeaderSize;
             int codesize = 0;
 
+            // Calc codesize
             foreach (Instruction ins in method.Body.Instructions)
             {
-                uint offset = ((uint)PEImage.ToFileOffset(method.RVA)) + method.Body.HeaderSize + ins.Offset;
-
                 codesize += ins.GetSize();
-
-                reader.Position = offset;
-                                
-                Console.WriteLine("0x{0:x} : {1} | {2}", offset, ins, 
-                    BitConverter.ToString(reader.ReadBytes(ins.GetSize())));
             }
 
-            Console.WriteLine("RVA {0:x}: codesize: {1:x}", method.RVA, codesize);
+            // Read origin IL
+            reader.Position = offset;
 
-            // Add resource
-            byte[] resourceData = Encoding.UTF8.GetBytes("Hello, world!");
-            module.Resources.Add(new EmbeddedResource("HelloWorld", resourceData,
+            byte[] originILbytes = reader.ReadBytes(codesize);
+            
+            // Save origin IL to resources
+            module.Resources.Add(new EmbeddedResource(method.MDToken.ToString(), originILbytes,
                 ManifestResourceAttributes.Private));
+
+            // Patch IL
+            var newILbody = new CilBody();
+            newILbody.Instructions.Add(nonsense.ToInstruction());
+
+            method.Body = newILbody;
         }
         static void pack()
         {
@@ -62,7 +67,7 @@ namespace Packer
                 // List methods
                 foreach (MethodDef method in type.Methods)
                 {
-                    Console.WriteLine("Packing Method: {0}", method.FullName);
+                    Console.WriteLine("Packing Method: {0} ({1})", method.FullName, method.MDToken);
                     packMethod(type, method);
                 }
             }
@@ -74,6 +79,12 @@ namespace Packer
             module = ModuleDefMD.Load(@"./testprog.exe", modCtx);
             PEImage = module.Metadata.PEImage;
             reader = module.Metadata.PEImage.DataReaderFactory.CreateReader();
+
+            // Create new opcode
+            nonsense = new OpCode(
+                "nonsense", 0xf1, 0x87, OperandType.InlineNone, FlowControl.Next, StackBehaviour.Push0, StackBehaviour.Pop0);
+
+            modCtx.RegisterExperimentalOpCode(nonsense);
 
             // Get assembly
             AssemblyDef asm = module.Assembly;

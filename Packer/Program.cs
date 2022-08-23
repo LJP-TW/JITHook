@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Net;
 using System.Reflection;
@@ -14,6 +15,8 @@ using dnlib.DotNet;
 using dnlib.DotNet.Emit;
 using dnlib.IO;
 using dnlib.PE;
+using MethodAttributes = dnlib.DotNet.MethodAttributes;
+using MethodImplAttributes = dnlib.DotNet.MethodImplAttributes;
 
 // Ref:
 // - https://github.com/0xd4d/dnlib/blob/master/Examples/
@@ -245,6 +248,8 @@ namespace Packer
             byte[] newil = new byte[stream.Length];
             stream.Read(newil, 0, newil.Length);
 
+            Console.WriteLine("[J] new IL: {0}", BitConverter.ToString(newil));
+
             // byte[] il = new byte[methodInfo->ilCodeSize];
             // Marshal.Copy((IntPtr)methodInfo->ilCode, il, 0, (int)methodInfo->ilCodeSize);
             // 
@@ -335,15 +340,14 @@ namespace Packer
             
             VirtualProtect(pCompileMethod, (uint)IntPtr.Size, (Protection)old, out old);
         }
-        static void entry()
+        public static void entry()
         {
             Console.WriteLine("[*] packer entry");
 
             // RegisterModule(typeof(packer).Module);
             Hook();
 
-            Console.WriteLine("[*] call origin entry");
-            callentry();
+            Console.WriteLine("[*] hook installed!");
         }
 
         private static void callentry()
@@ -376,20 +380,58 @@ namespace Packer
             byte[] originILbytes = reader.ReadBytes(codesize);
             
             // Save origin IL to resources
-            module.Resources.Add(new EmbeddedResource(method.MDToken.ToString(), originILbytes,
+            module.Resources.Add(new EmbeddedResource(method.MDToken.ToString().ToLower(), originILbytes,
                 ManifestResourceAttributes.Private));
 
             // Patch IL
-            CilBody newILbody = new CilBody();
-            newILbody.Instructions.Add(nonsense.ToInstruction());
+            method.Body.KeepOldMaxStack = true;
+            if (method.Body.Instructions[0].GetSize() == 1)
+            {
+                method.Body.Instructions[0] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
+            }
+            else if (method.Body.Instructions[0].GetSize() == 2)
+            {
+                method.Body.Instructions[0] = nonsense.ToInstruction();
+            }
 
-            method.Body = newILbody;
+            // for (int i = 0; i < method.Body.Instructions.Count; i++)
+            // {
+            //     int inssize = method.Body.Instructions[i].GetSize();
+            //     if (method.Body.Instructions[i].OpCode.Equals(OpCodes.Ret) ||
+            //         method.Body.Instructions[i].IsLeave())
+            //     {
+            //         continue;
+            //     }
+            // 
+            //     if (method.Body.Instructions[i].OpCode.Equals(OpCodes.Nop))
+            //     {
+            //         method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
+            //     }
+            // 
+            //     // if (inssize == 1)
+            //     // {
+            //     //     method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
+            //     // }
+            //     // else if (inssize == 2)
+            //     // {
+            //     //     method.Body.Instructions[i] = nonsense.ToInstruction();
+            //     // }
+            //     else
+            //     {
+            //         Console.WriteLine("[!] No patch: inssize {0}", inssize);
+            //     }
+            // }
         }
         static void pack()
         {
             // List types
             foreach (TypeDef type in module.GetTypes())
             {
+                if (type.FullName == "<Module>" ||
+                    type.FullName == "Packer.packer" || type.FullName.StartsWith("Packer.packer/"))
+                {
+                    continue;
+                }
                 Console.WriteLine("Packing Type: {0}", type.FullName);
                 // List methods
                 foreach (MethodDef method in type.Methods)
@@ -409,15 +451,14 @@ namespace Packer
         static void Main(string[] args)
         {
             // Test
-
-            Console.WriteLine("[*] Prepare {0}", typeof(packer).GetMethod("FindModule", BindingFlags.Static | BindingFlags.NonPublic).Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(packer).GetMethod("callentry", BindingFlags.Static | BindingFlags.NonPublic).Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(Console).GetMethod("WriteLine", new[] { typeof(string) }).Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(System.Reflection.Assembly).GetMethod("GetExecutingAssembly").Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(System.Reflection.Assembly).GetMethod("GetManifestResourceStream", new[] { typeof(string) }).Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(System.IO.Stream).GetMethod("Read").Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(Marshal).GetMethod("AllocHGlobal", new[] { typeof(int) }).Name);
-            Console.WriteLine("[*] Prepare {0}", typeof(Marshal).GetMethod("Copy", new[] { typeof(byte[]), typeof(int), typeof(IntPtr), typeof(int) }).Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(packer).GetMethod("FindModule", BindingFlags.Static | BindingFlags.NonPublic).Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(packer).GetMethod("callentry", BindingFlags.Static | BindingFlags.NonPublic).Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(Console).GetMethod("WriteLine", new[] { typeof(string) }).Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(System.Reflection.Assembly).GetMethod("GetExecutingAssembly").Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(System.Reflection.Assembly).GetMethod("GetManifestResourceStream", new[] { typeof(string) }).Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(System.IO.Stream).GetMethod("Read").Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(Marshal).GetMethod("AllocHGlobal", new[] { typeof(int) }).Name);
+            // Console.WriteLine("[*] Prepare {0}", typeof(Marshal).GetMethod("Copy", new[] { typeof(byte[]), typeof(int), typeof(IntPtr), typeof(int) }).Name);
             
             // Get module
             modCtx = ModuleDef.CreateModuleContext();
@@ -425,23 +466,15 @@ namespace Packer
             PEImage = module.Metadata.PEImage;
             reader = module.Metadata.PEImage.DataReaderFactory.CreateReader();
 
-            // Create new opcode
-            nonsense = new OpCode(
-                "nonsense", 0xf1, 0x87, OperandType.InlineNone, FlowControl.Next, StackBehaviour.Push0, StackBehaviour.Pop0);
-
-            modCtx.RegisterExperimentalOpCode(nonsense);
-
             // Get assembly
-            AssemblyDef asm = module.Assembly;
-            Console.WriteLine("Assembly: {0}", asm);
+            // AssemblyDef asm = module.Assembly;
+            // Console.WriteLine("Assembly: {0}", asm);
 
             // Get entrypoint
             MethodDef originEntry = module.EntryPoint;
             Console.WriteLine("Origin entry point method name: {0}", originEntry.FullName);
             // Console.WriteLine("Entry Point Method: {0}", entry.FullName);
             // Console.WriteLine("Type of Entry Point Method: {0}", entryType.FullName);
-
-            pack();
 
             // Create a method ref to 'System.Void System.Console::WriteLine(System.String)'
             // TypeRef consoleRef = new TypeRefUser(module, "System", "Console", module.CorLibTypes.AssemblyRef);
@@ -469,12 +502,13 @@ namespace Packer
             ModuleDefMD packerModule = ModuleDefMD.Load(@"./packer.exe", packerModCtx);
 
             // Get assembly
-            AssemblyDef packerAsm = module.Assembly;
-            Console.WriteLine("Packer Assembly: {0}", packerAsm);
+            // AssemblyDef packerAsm = module.Assembly;
+            // Console.WriteLine("Packer Assembly: {0}", packerAsm);
 
             // Get type
             TypeDef packerType = null;
-            
+
+            Console.WriteLine("Search for type Packer.packer...");
             foreach (var _type in packerModule.GetTypes())
             {
                 Console.WriteLine("Type name: {0}", _type.FullName);
@@ -487,34 +521,87 @@ namespace Packer
 
             if (packerType == null)
             {
+                Console.WriteLine("[!] packer type not found");
+                return;
+            }
+
+            TypeDef moduleType = null;
+
+            Console.WriteLine("Search for type <Module>...");
+            foreach (var _type in module.GetTypes())
+            {
+                Console.WriteLine("Type name: {0}", _type.FullName);
+                if (_type.FullName == "<Module>")
+                {
+                    moduleType = _type;
+                    break;
+                }
+            }
+
+            if (moduleType == null)
+            {
+                Console.WriteLine("[!] module type not found");
                 return;
             }
 
             // Patch callentry to call origin entry point
-            // TODO: Match the arguments of origin entry point
-            MethodDef packerCallentry = packerType.FindMethod("callentry");
-
-            TypeDef entryType = originEntry.DeclaringType;
-            TypeRef entryTypeRef = new TypeRefUser(packerModule, entryType.Namespace);
-            MemberRef entryRef = new MemberRefUser(packerModule, originEntry.Name, originEntry.MethodSig, entryTypeRef);
-
-            // TODO: Make call to origin entry point successful
-            CilBody newILbody = new CilBody();
-            newILbody.Instructions.Add(OpCodes.Ldstr.ToInstruction("Hello World!")); // argv
-            newILbody.Instructions.Add(OpCodes.Call.ToInstruction(entryRef));
-            newILbody.Instructions.Add(OpCodes.Ldc_I4_0.ToInstruction());
-            newILbody.Instructions.Add(OpCodes.Ret.ToInstruction());
-
-            packerCallentry.Body = newILbody;
+            // // TODO: Match the arguments of origin entry point
+            // MethodDef packerCallentry = packerType.FindMethod("callentry");
+            // 
+            // TypeDef entryType = originEntry.DeclaringType;
+            // TypeRef entryTypeRef = new TypeRefUser(packerModule, entryType.Namespace);
+            // MemberRef entryRef = new MemberRefUser(packerModule, originEntry.Name, originEntry.MethodSig, entryTypeRef);
+            // 
+            // // TODO: Make call to origin entry point successful
+            // CilBody newILbody = new CilBody();
+            // newILbody.Instructions.Add(OpCodes.Ldstr.ToInstruction("Hello World!")); // argv
+            // newILbody.Instructions.Add(OpCodes.Call.ToInstruction(originEntry));
+            // newILbody.Instructions.Add(OpCodes.Ret.ToInstruction());
+            // 
+            // packerCallentry.Body = newILbody;
 
             // Add Packer.packer type
             packerModule.Types.Remove(packerType);
             module.Types.Add(packerType);
 
-            // Set entrypoint
-            MethodDef packerEntry = packerType.FindMethod("entry");
-            module.EntryPoint = packerEntry;
+            // Create module initializer
+            MethodDef cctor = new MethodDefUser(".cctor",
+                MethodSig.CreateStatic(module.CorLibTypes.Void));
+            cctor.Attributes = MethodAttributes.Public | MethodAttributes.SpecialName | 
+                MethodAttributes.RTSpecialName | MethodAttributes.Static;
+            cctor.ImplAttributes = MethodImplAttributes.IL | MethodImplAttributes.Managed;
+            moduleType.Methods.Add(cctor);
 
+            MethodDef packerEntry = packerType.FindMethod("entry");
+
+            var cctorILbody = new CilBody();
+            cctor.Body = cctorILbody;
+            cctorILbody.Instructions.Add(OpCodes.Call.ToInstruction(packerEntry));
+            cctorILbody.Instructions.Add(OpCodes.Ret.ToInstruction());
+
+            // Set entrypoint
+            // MethodDef packerEntry = packerType.FindMethod("entry");
+            // module.EntryPoint = packerEntry;
+
+            // Save file
+            module.Write(@"./testprog_packed_ljp.tmp");
+
+            // Read again
+            modCtx = ModuleDef.CreateModuleContext();
+            module = ModuleDefMD.Load(@"./testprog_packed_ljp.tmp", modCtx);
+            PEImage = module.Metadata.PEImage;
+            reader = module.Metadata.PEImage.DataReaderFactory.CreateReader();
+
+            // Create new opcode
+            nonsense = new OpCode(
+                "nonsense", 0xf1, 0x87, OperandType.InlineNone, FlowControl.Next, StackBehaviour.Push0, StackBehaviour.Pop0);
+
+            modCtx.RegisterExperimentalOpCode(nonsense);
+
+            // Pack
+            pack();
+
+            // Save file
             module.Write(@"./testprog_packed_ljp.exe");
         }
     }

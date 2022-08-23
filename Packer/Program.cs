@@ -384,43 +384,46 @@ namespace Packer
                 ManifestResourceAttributes.Private));
 
             // Patch IL
+            // TODO: Unhandled Exception: dnlib.DotNet.Writer.ModuleWriterException:
+            //       Found some other method's instruction or a removed instruction.
+            //       You probably removed an instruction that is the target of a branch instruction or
+            //       an instruction that's the first/last instruction in an exception handler.
+            //       Error occurred after metadata event BeginWriteMethodBodies
+            HashSet<uint> dontpatchins = new HashSet<uint>();
+
             method.Body.KeepOldMaxStack = true;
-            if (method.Body.Instructions[0].GetSize() == 1)
+
+            foreach (ExceptionHandler ex in method.Body.ExceptionHandlers)
             {
-                method.Body.Instructions[0] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
-            }
-            else if (method.Body.Instructions[0].GetSize() == 2)
-            {
-                method.Body.Instructions[0] = nonsense.ToInstruction();
+                dontpatchins.Add(ex.HandlerStart.Offset);
+                dontpatchins.Add(ex.HandlerEnd.Offset);
+
+                Console.WriteLine("Don't patch: {0} | {1}", ex.HandlerStart.Offset, ex.HandlerStart);
+                Console.WriteLine("Don't patch: {0} | {1}", ex.HandlerEnd.Offset, ex.HandlerEnd);
             }
 
-            // for (int i = 0; i < method.Body.Instructions.Count; i++)
-            // {
-            //     int inssize = method.Body.Instructions[i].GetSize();
-            //     if (method.Body.Instructions[i].OpCode.Equals(OpCodes.Ret) ||
-            //         method.Body.Instructions[i].IsLeave())
-            //     {
-            //         continue;
-            //     }
-            // 
-            //     if (method.Body.Instructions[i].OpCode.Equals(OpCodes.Nop))
-            //     {
-            //         method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
-            //     }
-            // 
-            //     // if (inssize == 1)
-            //     // {
-            //     //     method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
-            //     // }
-            //     // else if (inssize == 2)
-            //     // {
-            //     //     method.Body.Instructions[i] = nonsense.ToInstruction();
-            //     // }
-            //     else
-            //     {
-            //         Console.WriteLine("[!] No patch: inssize {0}", inssize);
-            //     }
-            // }
+            for (int i = 0; i < method.Body.Instructions.Count - 1; i++)
+            {
+                if (dontpatchins.Contains(method.Body.Instructions[i].Offset))
+                {
+                    continue;
+                }
+
+                int inssize = method.Body.Instructions[i].GetSize();
+            
+                if (inssize == 1)
+                {
+                    method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
+                }
+                else if (inssize == 2)
+                {
+                    method.Body.Instructions[i] = nonsense.ToInstruction();
+                }
+                else
+                {
+                    Console.WriteLine("[!] No patch: inssize {0}", inssize);
+                }
+            }
         }
         static void pack()
         {

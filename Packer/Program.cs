@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 // dnlib
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
+using dnlib.DotNet.Writer;
 using dnlib.IO;
 using dnlib.PE;
 using MethodAttributes = dnlib.DotNet.MethodAttributes;
@@ -384,7 +385,6 @@ namespace Packer
                 ManifestResourceAttributes.Private));
 
             // Patch IL
-            // TODO: Patch 5-byte opcode
             HashSet<uint> tryStart = new HashSet<uint>();
             HashSet<uint> handlerStart = new HashSet<uint>();
             HashSet<uint> handlerEnd = new HashSet<uint>();
@@ -405,9 +405,6 @@ namespace Packer
                     method.Body.Instructions[i].IsBr() ||
                     method.Body.Instructions[i].IsConditionalBranch())
                 {
-                    Console.WriteLine("[*] {0} | {1} | {2}", method.Body.Instructions[i].Offset,
-                        method.Body.Instructions[i], method.Body.Instructions[i].ToString());
-
                     brTarget.Add(method.Body.Instructions[i].ToString().Split()[2]);
                 }
             }
@@ -422,22 +419,13 @@ namespace Packer
                     handlerStart.Contains(method.Body.Instructions[i].Offset) ||
                     handlerEnd.Contains(method.Body.Instructions[i].Offset + ((uint)inssize)))
                 {
-                    Console.WriteLine("Don't patch: {0} | {1}", method.Body.Instructions[i].Offset,
-                        method.Body.Instructions[i]);
                     continue;
                 }
-            
-                if (inssize == 1)
+
+                method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
+                for (int _ = 0; _ < inssize - 1; ++_)
                 {
-                    method.Body.Instructions[i] = OpCodes.Conv_Ovf_U2_Un.ToInstruction();
-                }
-                else if (inssize == 2)
-                {
-                    method.Body.Instructions[i] = nonsense.ToInstruction();
-                }
-                else
-                {
-                    Console.WriteLine("[!] No patch: inssize {0}", inssize);
+                    method.Body.Instructions.Insert(i, OpCodes.Conv_Ovf_U2_Un.ToInstruction());
                 }
             }
         }
@@ -612,16 +600,18 @@ namespace Packer
             reader = module.Metadata.PEImage.DataReaderFactory.CreateReader();
 
             // Create new opcode
-            nonsense = new OpCode(
-                "nonsense", 0xf1, 0x87, OperandType.InlineNone, FlowControl.Next, StackBehaviour.Push0, StackBehaviour.Pop0);
-
-            modCtx.RegisterExperimentalOpCode(nonsense);
+            // nonsense = new OpCode(
+            //     "nonsense", 0xf1, 0x87, OperandType.InlineNone, FlowControl.Next, StackBehaviour.Push0, StackBehaviour.Pop0);
+            // 
+            // modCtx.RegisterExperimentalOpCode(nonsense);
 
             // Pack
             pack();
 
             // Save file
-            module.Write(@"./testprog_packed_ljp.exe");
+            ModuleWriterOptions opts = new ModuleWriterOptions(module);
+            opts.MetadataOptions.Flags = MetadataFlags.PreserveAll;
+            module.Write(@"./testprog_packed_ljp.exe", opts);
         }
     }
 }

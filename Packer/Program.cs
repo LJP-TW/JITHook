@@ -384,32 +384,48 @@ namespace Packer
                 ManifestResourceAttributes.Private));
 
             // Patch IL
-            // TODO: Unhandled Exception: dnlib.DotNet.Writer.ModuleWriterException:
-            //       Found some other method's instruction or a removed instruction.
-            //       You probably removed an instruction that is the target of a branch instruction or
-            //       an instruction that's the first/last instruction in an exception handler.
-            //       Error occurred after metadata event BeginWriteMethodBodies
-            HashSet<uint> dontpatchins = new HashSet<uint>();
+            // TODO: Patch 5-byte opcode
+            HashSet<uint> tryStart = new HashSet<uint>();
+            HashSet<uint> handlerStart = new HashSet<uint>();
+            HashSet<uint> handlerEnd = new HashSet<uint>();
+            HashSet<string> brTarget = new HashSet<string>();
 
             method.Body.KeepOldMaxStack = true;
 
             foreach (ExceptionHandler ex in method.Body.ExceptionHandlers)
             {
-                dontpatchins.Add(ex.HandlerStart.Offset);
-                dontpatchins.Add(ex.HandlerEnd.Offset);
-
-                Console.WriteLine("Don't patch: {0} | {1}", ex.HandlerStart.Offset, ex.HandlerStart);
-                Console.WriteLine("Don't patch: {0} | {1}", ex.HandlerEnd.Offset, ex.HandlerEnd);
+                tryStart.Add(ex.TryStart.Offset);
+                handlerStart.Add(ex.HandlerStart.Offset);
+                handlerEnd.Add(ex.HandlerEnd.Offset);
             }
 
             for (int i = 0; i < method.Body.Instructions.Count - 1; i++)
             {
-                if (dontpatchins.Contains(method.Body.Instructions[i].Offset))
+                if (method.Body.Instructions[i].IsLeave() ||
+                    method.Body.Instructions[i].IsBr() ||
+                    method.Body.Instructions[i].IsConditionalBranch())
                 {
+                    Console.WriteLine("[*] {0} | {1} | {2}", method.Body.Instructions[i].Offset,
+                        method.Body.Instructions[i], method.Body.Instructions[i].ToString());
+
+                    brTarget.Add(method.Body.Instructions[i].ToString().Split()[2]);
+                }
+            }
+
+            for (int i = 0; i < method.Body.Instructions.Count - 1; i++)
+            {
+                int inssize = method.Body.Instructions[i].GetSize();
+                string IL = method.Body.Instructions[i].ToString().Split(':')[0];
+
+                if (brTarget.Contains(IL) ||
+                    tryStart.Contains(method.Body.Instructions[i].Offset) ||
+                    handlerStart.Contains(method.Body.Instructions[i].Offset) ||
+                    handlerEnd.Contains(method.Body.Instructions[i].Offset + ((uint)inssize)))
+                {
+                    Console.WriteLine("Don't patch: {0} | {1}", method.Body.Instructions[i].Offset,
+                        method.Body.Instructions[i]);
                     continue;
                 }
-
-                int inssize = method.Body.Instructions[i].GetSize();
             
                 if (inssize == 1)
                 {

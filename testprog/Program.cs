@@ -26,6 +26,14 @@ namespace testprog
         {
             throw new Exception("tinyFunc2");
         }
+        static void tinyFunc3()
+        {
+            ga = ga * gb;
+        }
+        static void tinyFunc4()
+        {
+            ga = ga - gb;
+        }
 
         // The method is too large to encode the size (i.e., at least 64 bytes)
         static int fatFunc1(int a, int b)
@@ -122,6 +130,24 @@ namespace testprog
             return a;
         }
 
+        static int fatFunc8(int a)
+        {
+            int ret;
+
+            if (a == 0)
+            {
+                tinyFunc3();
+                ret = 3;
+            }
+            else
+            {
+                tinyFunc4();
+                ret = 4;
+            }
+
+            return ret;
+        }
+
         static void Main(string[] args)
         {
             Console.WriteLine("Test program, press any key to continue");
@@ -202,6 +228,11 @@ namespace testprog
             Console.WriteLine("Test fatFunc7");
             ret = fatFunc7(4, 0, 2);
             // 0
+            Console.WriteLine("ret: " + ret.ToString());
+
+            Console.WriteLine("Test fatFunc8");
+            ret = fatFunc8(0);
+            // 3
             Console.WriteLine("ret: " + ret.ToString());
         }
     }

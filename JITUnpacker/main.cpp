@@ -14,6 +14,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <set>
 
 // mscorlib-related
 #include <metahost.h>
@@ -61,6 +62,7 @@ struct methodDefInfo
     BYTE *methodHeader;
     BYTE *methodILCode;
     UINT methodILCodeSize;
+    BOOL rvaDuplicated;
 };
 std::unordered_map<int, methodDefInfo> methodMap;
 
@@ -619,6 +621,7 @@ CorJitResult compileMethodHook(
     logPrintf(LOG_LEVEL_WARNING, "\t[+] IL has been edited!\n");
 
     if (info->ILCodeSize > method.methodILCodeSize) {
+        // TODO: Create another space for methods which RVA is duplicated.
         INT ILAddr;
 
         // Add new section
@@ -807,6 +810,7 @@ void assemblyAnalyze(void)
     }
 
     BYTE *methodTable = tables[6];
+    std::set<UINT> rvas;
 
     for (UINT i = 0; i < metadataTableNums[6]; ++i, methodTable += 0xe) {
         BYTE *code;
@@ -844,7 +848,9 @@ void assemblyAnalyze(void)
         logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] IL code size: %#x\n", codesize);
         logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] IL code: %p\n", code);
 
-        methodMap[token] = { prva, name, header, code, codesize };
+        methodMap[token] = { prva, name, header, code, codesize, rvas.find(*prva) == rvas.end() };
+
+        rvas.insert(*prva);
     }
 }
 

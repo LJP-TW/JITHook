@@ -306,6 +306,9 @@ namespace Packer
         static IPEImage PEImage;
         static DataReader reader;
 
+        static string argOutputFile;
+        static string argInputFile;
+
         static void packMethod(TypeDef type, MethodDef method)
         {
             uint offset = ((uint)PEImage.ToFileOffset(method.RVA)) + method.Body.HeaderSize;
@@ -401,9 +404,24 @@ namespace Packer
         }
         static void Main(string[] args)
         {
+            argInputFile = "./testprog.exe";
+            argOutputFile = "./testprog_packed.exe";
+
+            for (int i = 0; i < args.Length; ++i)
+            {
+                if (args[i] == "-o")
+                {
+                    ++i;
+                    argOutputFile = args[i];
+                } else
+                {
+                    argInputFile = args[i];
+                }
+            }
+
             // Get target module
             modCtx = ModuleDef.CreateModuleContext();
-            module = ModuleDefMD.Load(@"./testprog.exe", modCtx);
+            module = ModuleDefMD.Load(@argInputFile, modCtx);
             PEImage = module.Metadata.PEImage;
             reader = module.Metadata.PEImage.DataReaderFactory.CreateReader();
 
@@ -488,7 +506,7 @@ namespace Packer
                 ModuleWriterOptions opts = new ModuleWriterOptions(module);
                 opts.MetadataOptions.Flags = MetadataFlags.PreserveAll;
 
-                module.Write(@"./testprog_packed_ljp.exe", opts);
+                module.Write(@argOutputFile, opts);
             }
         }
     }

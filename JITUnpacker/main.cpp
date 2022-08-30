@@ -362,14 +362,14 @@ void openPackedFile(const char *filename)
     logPrintf(LOG_LEVEL_DEBUG, "[*] file length: %d\n", PEStruct.PEFileLength);
 }
 
-void saveFile(void)
+void saveFile(const char *filename)
 {
-    std::ofstream target("output.exe_", std::ofstream::binary);
+    std::ofstream target(filename, std::ofstream::binary);
 
     target.write((char *)PEStruct.PEFile, PEStruct.PEFileLength);
     target.close();
 
-    logPrintf(LOG_LEVEL_INFO, "[*] Checkout output.exe_\n");
+    logPrintf(LOG_LEVEL_INFO, "[*] Checkout %s\n", filename);
 }
 
 int clrHost(ICorRuntimeHost **pRuntimeHost)
@@ -878,7 +878,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    saveFile();
+    saveFile(argOutputFilename.c_str());
 
     logPrintf(LOG_LEVEL_INFO, "[*] CLRHosting Terminated\n");
 

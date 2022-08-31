@@ -41,6 +41,12 @@ namespace testprog
             return a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b;
         }
 
+        // The method is too large to encode the size (i.e., at least 64 bytes)
+        static int fatFunc1_1(int a, int b)
+        {
+            return b + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b + a + b;
+        }
+
         // There are local variables 
         static int fatFunc2(int a, int b)
         {
@@ -233,6 +239,11 @@ namespace testprog
             Console.WriteLine("Test fatFunc8");
             ret = fatFunc8(0);
             // 3
+            Console.WriteLine("ret: " + ret.ToString());
+
+            Console.WriteLine("Test fatFunc1_1");
+            ret = fatFunc1_1(1, 2);
+            // 61
             Console.WriteLine("ret: " + ret.ToString());
         }
     }

@@ -103,9 +103,12 @@ void init(void)
     if (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber == 19043) {
         localVarSigTokOffset = 0x520;
     } else if (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber == 19044) {
-        localVarSigTokOffset = 0x508;
+        // TODO: Check if localVarSigTokOffset can be adjusted according to OS version
+        // localVarSigTokOffset = 0x508;
+        localVarSigTokOffset = 0x4d8;
     } else {
-        localVarSigTokOffset = 0x508;
+        // localVarSigTokOffset = 0x508;
+        localVarSigTokOffset = 0x4d8;
         logPrintf(LOG_LEVEL_ERR, "[!] OS version is not currently supported and may have bugs\n");
     }
 }
@@ -213,6 +216,7 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
     UINT hdrSize = 12;
     UINT clauseSize;
     CORINFO_EH_CLAUSE_TINY *tinyclause = nullptr;
+    int padding = 0;
 
     rva = PEStruct.newSectionVA + newMethodOffset;
 
@@ -245,10 +249,19 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
         delete[] clause;
     }
 
-    // Copy header & ILCode
     base = PEStruct.newSectionRaw + newMethodOffset;
     offset = 0;
 
+    // Align 4-byte
+    if (newMethodOffset % 4) {
+        padding = 4 - newMethodOffset % 4;
+    }
+
+    memset(PEStruct.PEFile + base, 0, padding);
+    offset += padding;
+    rva += padding;
+
+    // Copy header & ILCode
     memcpy(PEStruct.PEFile + base + offset, &header, hdrSize);
     offset += hdrSize;
 
@@ -257,7 +270,7 @@ static INT createNewMethodBodyFat(uint8_t *ILCode, UINT ILCodeSize,
 
     if (info->EHcount) {
         // Align 4-byte
-        int padding = 0;
+        padding = 0;
 
         if (ILCodeSize % 4) {
             padding = 4 - ILCodeSize % 4;
@@ -620,8 +633,7 @@ CorJitResult compileMethodHook(
     // IL has been edited, update it
     logPrintf(LOG_LEVEL_WARNING, "\t[+] IL has been edited!\n");
 
-    if (info->ILCodeSize > method.methodILCodeSize) {
-        // TODO: Create another space for methods which RVA is duplicated.
+    if (info->ILCodeSize > method.methodILCodeSize || method.rvaDuplicated) {
         INT ILAddr;
 
         // Add new section
@@ -848,7 +860,7 @@ void assemblyAnalyze(void)
         logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] IL code size: %#x\n", codesize);
         logPrintf(LOG_LEVEL_DEBUG, "\t\t[*] IL code: %p\n", code);
 
-        methodMap[token] = { prva, name, header, code, codesize, rvas.find(*prva) == rvas.end() };
+        methodMap[token] = { prva, name, header, code, codesize, rvas.find(*prva) != rvas.end() };
 
         rvas.insert(*prva);
     }
@@ -859,9 +871,9 @@ int main(int argc, char *argv[])
     ICorRuntimeHost *pRuntimeHost = NULL; // Alternative: ICLRRuntimeHost
     mscorlib::_AssemblyPtr pAssembly = NULL;
 
-    init();
-
     parseArg(argc, argv);
+
+    init();
 
     openPackedFile(argFilename.c_str());
 

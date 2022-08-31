@@ -427,7 +427,7 @@ namespace Packer
 
             // Get packer module
             ModuleContext packerModCtx = ModuleDef.CreateModuleContext();
-            ModuleDefMD packerModule = ModuleDefMD.Load(@"./packer.exe", packerModCtx);
+            ModuleDefMD packerModule = ModuleDefMD.Load(@Environment.GetCommandLineArgs()[0], packerModCtx);
 
             // Get Packer.packer type of packer module
             TypeDef packerType = null;

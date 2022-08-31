@@ -9,21 +9,21 @@ git clone --recursive https://github.com/LJP-TW/JITHook.git
 Open `JIT_Hook.sln` with Visual Studio Community 2022, configure project with release x64, press ctrl+shift+b to build the whole solution.
 
 # Usage
-## JITHook
+## JITDemo
 ```
-JITHook.exe
+JITDemo.exe
 ```
 
 It's just a demo of patching method IL.
 
 You can try to reverse-engineer it :)
 
-## Packer
+## JITPacker
 ```
-packer.exe [OPTION] <program path>
+JITPacker.exe [OPTION] <program path>
 ```
 
-`Packer.exe` will pack the program.
+`JITPacker.exe` will pack the program.
 
 OPTION:
 * `-o <PATH>`: Set output file path. Default path is `testprog_packed.exe`.

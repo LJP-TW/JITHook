@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JITDemo", "JITDemo\JITDemo.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JITPacker", "JITPacker\JITPacker.csproj", "{E63ADFFA-00FE-4AF5-B10B-7FB53B27281D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "testprog_any", "testprog_any\testprog_any.csproj", "{C40690A8-AD79-4BE1-845E-C282F83E5A0D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -83,6 +85,18 @@ Global
 		{E63ADFFA-00FE-4AF5-B10B-7FB53B27281D}.Release|x64.Build.0 = Release|Any CPU
 		{E63ADFFA-00FE-4AF5-B10B-7FB53B27281D}.Release|x86.ActiveCfg = Release|Any CPU
 		{E63ADFFA-00FE-4AF5-B10B-7FB53B27281D}.Release|x86.Build.0 = Release|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Debug|x64.Build.0 = Debug|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Debug|x86.Build.0 = Debug|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Release|x64.ActiveCfg = Release|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Release|x64.Build.0 = Release|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Release|x86.ActiveCfg = Release|Any CPU
+		{C40690A8-AD79-4BE1-845E-C282F83E5A0D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

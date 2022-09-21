@@ -1,7 +1,12 @@
 #define _CRT_SECURE_NO_WARNINGS
 
-#pragma warning( disable : 6031)
+#pragma warning(disable : 4146)
+#pragma warning(disable : 6031)
 
+// LIEF
+#include <LIEF/LIEF.hpp>
+
+// Windows
 #include <Windows.h>
 #include <comdef.h>
 
@@ -15,6 +20,7 @@
 #include <unordered_map>
 #include <vector>
 #include <set>
+#include <cstdio>
 
 // mscorlib-related
 #include <metahost.h>
@@ -44,10 +50,6 @@ struct PEStruct_t
 {
     BYTE        *PEFile;
     UINT         PEFileLength;
-    UINT         sectionCnt;
-    UINT         sectionHdrOffset;
-    UINT         sectionRawAlignment;
-    UINT         sectionVAAlignment;
     UINT         newSectionRaw;
     UINT         newSectionVA;
 };
@@ -79,6 +81,8 @@ struct PESection_t
     USHORT     nLN;
     UINT       characteristics;
 };
+
+void openPackedFile(const char *filename);
 
 void init(void)
 {
@@ -118,66 +122,63 @@ void init(void)
  */
 void assemblyAnalyze(void);
 
+void _createNewSection(void)
+{
+    std::unique_ptr<LIEF::PE::Binary> pe = LIEF::PE::Parser::parse("ljp.tmp");
+    LIEF::PE::Section section;
+
+    std::vector<uint8_t> content(0x1000, 0);
+
+    section.name(".ljp");
+    section.content(content);
+
+    pe->add_section(section, LIEF::PE::PE_SECTION_TYPES::TEXT);
+    pe->write("ljp.tmp");
+
+    delete[] PEStruct.PEFile;
+    openPackedFile("ljp.tmp");
+
+    std::remove("ljp.tmp");
+}
+
 /*
  * Create a section with size 0x1000
  */
 void createNewSection(void)
 {
-    UINT newSectionSize = ALIGN(0x1000, PEStruct.sectionRawAlignment);
-    UINT newRaw = ALIGN(PEStruct.PEFileLength, PEStruct.sectionRawAlignment);
-    UINT newPEFileLength = newRaw + newSectionSize;
-    BYTE *newPEFile = new BYTE[newPEFileLength];
-    BYTE *sectionHdr, *sectionCur;
-    PESection_t *newSection;
-    UINT newSectionVA = 0;
+    // Save file
+    std::ofstream target("ljp.tmp", std::ofstream::binary);
 
-    memcpy(newPEFile, PEStruct.PEFile, PEStruct.PEFileLength);
+    target.write((char *)PEStruct.PEFile, PEStruct.PEFileLength);
+    target.close();
 
-    BYTE *ntHdr = newPEFile + *(UINT *)(newPEFile + 0x3c);
-    USHORT *sectionCnt = (USHORT *)(ntHdr + 0x6);
-    UINT *imageSize = (UINT *)(ntHdr + 0x50);
-
-    *sectionCnt = *sectionCnt + 1;
-    *imageSize = *imageSize + newSectionSize;
-
-    sectionHdr = newPEFile + PEStruct.sectionHdrOffset;
-
-    sectionCur = sectionHdr;
-    for (int i = 0; i < PEStruct.sectionCnt; ++i) {
-        UINT va = *(UINT *)(sectionCur + 0xc);
-        UINT vasize = *(UINT *)(sectionCur + 0x8);
-        UINT nextVA = ALIGN(va + vasize, PEStruct.sectionVAAlignment);
-
-        if (nextVA > newSectionVA) {
-            newSectionVA = nextVA;
-        }
-
-        sectionCur += 0x28;
-    }
-
-    // TODO: There may not be enough space to create a new section header
-    newSection = (PESection_t *)sectionCur;
-    memcpy(newSection->name, ".ljp", 5);
-    newSection->ptrReloc = NULL;
-    newSection->ptrLN = NULL;
-    newSection->nReloc = 0;
-    newSection->nLN = 0;
-    newSection->VA = newSectionVA;
-    newSection->VASize = newSectionSize;
-    newSection->raw = newRaw;
-    newSection->rawSize = newSectionSize;
-    newSection->characteristics = 0x60000020;
-
-    delete[] PEStruct.PEFile;
-    PEStruct.PEFile = newPEFile;
-    PEStruct.PEFileLength = newPEFileLength;
+    // Create new seciton
+    _createNewSection();
 
     // Redo analyze
     methodMap.clear();
     assemblyAnalyze();
 
-    PEStruct.newSectionRaw = newRaw;
-    PEStruct.newSectionVA  = newSectionVA;
+    // Set PEStruct.newSectionRaw & PEStruct.newSectionVA
+    BYTE *baseaddr = PEStruct.PEFile;
+    BYTE *ntHdr = baseaddr + *(UINT *)(baseaddr + 0x3c);
+    USHORT sectionCnt = *(USHORT *)(ntHdr + 0x6);
+
+    UINT optionalHdrSize = *(USHORT *)(ntHdr + 0x14);
+    BYTE *optionalHdr = ntHdr + 0x18;
+
+    BYTE *sectionHdr = optionalHdr + optionalHdrSize;
+    INT offset = 0;
+
+    for (int i = 0; i < sectionCnt; ++i) {
+        if (!strcmp((char *)sectionHdr, ".ljp")) {
+            PEStruct.newSectionRaw = *(UINT *)(sectionHdr + 0x14);
+            PEStruct.newSectionVA = *(UINT *)(sectionHdr + 0xc);
+            break;
+        }
+
+        sectionHdr += 0x28;
+    }
 }
 
 static INT createNewMethodBodyTiny(uint8_t *ILCode, UINT ILCodeSize)
@@ -726,20 +727,22 @@ void assemblyAnalyze(void)
     UINT optionalHdrSize = *(USHORT *)(ntHdr + 0x14);
     BYTE *optionalHdr = ntHdr + 0x18;
     USHORT magic = *(USHORT *)optionalHdr;
+    UINT imageCor20HdrOffset = 0;
 
-    if (magic != 0x20b) {
-        logPrintf(LOG_LEVEL_ERR, "[!] Only support 64-bit program\n");
+    if (magic == 0x20b) {
+        logPrintf(LOG_LEVEL_DEBUG, "[!] 64-bit program\n");
+        imageCor20HdrOffset = 0xe0;
+    } else if (magic == 0x10b) {
+        logPrintf(LOG_LEVEL_DEBUG, "[!] 32-bit program\n");
+        imageCor20HdrOffset = 0xd0;
+    } else {
+        logPrintf(LOG_LEVEL_ERR, "[!] Error: weird magic of optional header\n");
         exit(1);
     }
 
     BYTE *sectionHdr = optionalHdr + optionalHdrSize;
     INT offset = 0;
-    UINT imageCor20HdrRva = *(UINT *)(optionalHdr + 0xe0);
-
-    PEStruct.sectionCnt = sectionCnt;
-    PEStruct.sectionHdrOffset = sectionHdr - baseaddr;
-    PEStruct.sectionRawAlignment = *(UINT *)(optionalHdr + 0x24);
-    PEStruct.sectionVAAlignment  = *(UINT *)(optionalHdr + 0x20);
+    UINT imageCor20HdrRva = *(UINT *)(optionalHdr + imageCor20HdrOffset);
 
     // Find raw addr of imageCor20Hdr
     BYTE *section_cur = sectionHdr;

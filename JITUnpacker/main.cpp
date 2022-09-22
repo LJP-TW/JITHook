@@ -501,6 +501,7 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
 {
     HRESULT hr;
     mscorlib::_MethodInfoPtr pMethodInfo = NULL;
+    SAFEARRAY *pMethodParams;
     VARIANT retVal;
     VARIANT obj;
     VARIANT args;
@@ -517,25 +518,39 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     }
     logPrintf(LOG_LEVEL_DEBUG, "[*] pAssembly->get_EntryPoint(...) succeeded\n");
 
+    hr = pMethodInfo->raw_GetParameters(&pMethodParams);
+
+    if (FAILED(hr)) {
+        logPrintf(LOG_LEVEL_ERR, "[!] pAssembly->raw_GetParameters(...) failed\n");
+        return -1;
+    }
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pAssembly->raw_GetParameters(...) succeeded\n");
+
     ZeroMemory(&retVal, sizeof(VARIANT));
     ZeroMemory(&obj, sizeof(VARIANT));
     obj.vt = VT_NULL;
 
-    args.vt = VT_ARRAY | VT_BSTR;
-    argsBound[0].lLbound = 0;
-    argsBound[0].cElements = argc;
-    args.parray = SafeArrayCreate(VT_BSTR, 1, argsBound);
-    for (int i = 0; i < argc; i++) {
-        std::wstring wc(strlen(argv[i]), L'#');
-        mbstowcs(&wc[0], argv[i], strlen(argv[i]));
-        idx[0] = i;
-        SafeArrayPutElement(args.parray, idx, SysAllocString(wc.c_str()));
+    if (pMethodParams->rgsabound->cElements == 1) {
+        args.vt = VT_ARRAY | VT_BSTR;
+        argsBound[0].lLbound = 0;
+        argsBound[0].cElements = argc;
+        args.parray = SafeArrayCreate(VT_BSTR, 1, argsBound);
+        for (int i = 0; i < argc; i++) {
+            std::wstring wc(strlen(argv[i]), L'#');
+            mbstowcs(&wc[0], argv[i], strlen(argv[i]));
+            idx[0] = i;
+            SafeArrayPutElement(args.parray, idx, SysAllocString(wc.c_str()));
+        }
+        paramsBound[0].lLbound = 0;
+        paramsBound[0].cElements = 1;
+        params = SafeArrayCreate(VT_VARIANT, 1, paramsBound);
+        idx[0] = 0;
+        SafeArrayPutElement(params, idx, &args);
+    } else {
+        paramsBound[0].lLbound = 0;
+        paramsBound[0].cElements = 0;
+        params = SafeArrayCreate(VT_VARIANT, 1, paramsBound);
     }
-    paramsBound[0].lLbound = 0;
-    paramsBound[0].cElements = 1;
-    params = SafeArrayCreate(VT_VARIANT, 1, paramsBound);
-    idx[0] = 0;
-    SafeArrayPutElement(params, idx, &args);
 
     logPrintf(LOG_LEVEL_INFO, "[*] Press any key to run .NET assembly\n");
     PAUSE();
@@ -544,10 +559,10 @@ int assemblyRun(mscorlib::_AssemblyPtr pAssembly, int argc, char *argv[])
     hr = pMethodInfo->raw_Invoke_3(obj, params, &retVal);
 
     if (FAILED(hr)) {
-        logPrintf(LOG_LEVEL_ERR, "[!] pMethodInfo->Invoke_3(...) failed, hr = %X\n", hr);
+        logPrintf(LOG_LEVEL_ERR, "[!] pMethodInfo->raw_Invoke_3(...) failed, hr = %X\n", hr);
         return -1;
     }
-    logPrintf(LOG_LEVEL_DEBUG, "[*] pMethodInfo->Invoke_3(...) succeeded\n");
+    logPrintf(LOG_LEVEL_DEBUG, "[*] pMethodInfo->raw_Invoke_3(...) succeeded\n");
 }
 
 void reportNative(uint8_t **nativeEntry, uint32_t *nativeSizeOfCode)

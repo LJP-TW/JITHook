@@ -2,11 +2,29 @@
 The goal of this repository is to show you techniques for packing/unpacking .NET assemblies (programs) by abusing .NET's JIT mechanism.
 
 # Build
-```
-git clone --recursive https://github.com/LJP-TW/JITHook.git
-```
-
-Open `JIT_Hook.sln` with Visual Studio Community 2022, configure project with release x64, press ctrl+shift+b to build the whole solution.
+1. Clone this project
+    ```
+    git clone --recursive https://github.com/LJP-TW/JITHook.git
+    ```
+2. Install [lief-project/LIEF](https://github.com/lief-project/LIEF).
+    * Download [LIEF-0.12.1-win64.zip](https://github.com/lief-project/LIEF/releases/tag/0.12.1)
+    * Decompress it to `JITHook/Lib`. The following is the expected directory structure:
+        ```
+        JITHook/
+        |- JITDemo
+        |- JITPacker
+        |- JITUnpacker
+        |- ...
+        |- Lib
+           |- dnlib
+           |- LIEF-0.12.1-win64
+              |- include
+              |- lib
+        ```
+        * (You can remove folders `bin` and `share` in the LIEF folder)
+        * (See [LIEF Documentation](https://lief-project.github.io/doc/latest/installation.html#visual-studio-integration) for troubleshooting)
+3. Open `JIT_Hook.sln` with Visual Studio Community 2022, configure project with release x64, press ctrl+shift+b to build the whole solution.
+4. Check `JITHook/Release` to see result
 
 # Usage
 ## JITDemo

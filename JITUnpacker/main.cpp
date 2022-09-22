@@ -30,6 +30,7 @@
 #include "args.h"
 #include "corjit.h"
 #include "log.h"
+#include "sha1.hpp"
 
 #define PAUSE() do { logPrintf(LOG_LEVEL_INFO, "[*] PAUSE\n"); scanf("%*c"); } while(0)
 
@@ -68,6 +69,13 @@ struct methodDefInfo
 };
 std::unordered_map<int, methodDefInfo> methodMap;
 
+struct localVarSigInfo
+{
+    UINT token;
+    std::vector<uint8_t> sig;
+};
+std::unordered_map<std::string, localVarSigInfo> localVarSigMap;
+
 struct PESection_t
 {
     BYTE       name[8];
@@ -81,6 +89,26 @@ struct PESection_t
     USHORT     nLN;
     UINT       characteristics;
 };
+
+static inline std::vector<uint8_t> getLocalVarSig(BYTE *pSig)
+{
+    int len;
+
+    if ((*pSig & 0x80) == 0) {
+        len = *pSig;
+        pSig += 1;
+    } else if ((*pSig & 0xc0) == 0x80) {
+        len = ((*pSig & 0x3f) << 8) + *(pSig + 1);
+        pSig += 2;
+    } else {
+        len = ((*pSig & 0x1f) << 24) + (*(pSig + 1) << 16) + (*(pSig + 2) << 8) + *(pSig + 3);
+        pSig += 4;
+    }
+
+    std::vector<uint8_t> sig(&pSig[0], &pSig[len]);
+
+    return sig;
+}
 
 void openPackedFile(const char *filename);
 
@@ -302,23 +330,37 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
 {
     uint8_t *ILCode;
     UINT ILCodeSize;
-    UINT localVarSigTok;
+    UINT localVarSigTok = 0;
     CORINFO_EH_CLAUSE *clause = nullptr;
-    int validLocalVarSigTok = 0;
     int fat = 0;
+    std::vector<uint8_t> sig;
+    SHA1 sha1;
+
+    logPrintf(LOG_LEVEL_DEBUG, "[*] info: %p\n", info);
 
     ILCode = info->ILCode;
     ILCodeSize = info->ILCodeSize;
-    localVarSigTok = *(DWORD *)(((BYTE *)info) + localVarSigTokOffset);
 
-    logPrintf(LOG_LEVEL_DEBUG, "[*] info: %p\n", info);
-    logPrintf(LOG_LEVEL_DEBUG, "[*] localVarSigTok: %#x\n", localVarSigTok);
-
-    if (((localVarSigTok >> 24) & 0xff) == 0x11) {
+    if (info->locals.pSig) {
         // There are local variables
-        fat = 1;
-        validLocalVarSigTok = 1;
-    } else if (ILCodeSize >= 1 << 6) {
+        // Get localVarSigTok
+        sig = getLocalVarSig(info->locals.pSig - 1);
+
+        sha1.update(sig);
+
+        auto localVarSigIter = localVarSigMap.find(sha1.final());
+
+        if (localVarSigIter == localVarSigMap.end()) {
+            logPrintf(LOG_LEVEL_ERR, "[*] localVarSig not found ?_?\n");
+        } else {
+            fat = 1;
+            localVarSigTok = localVarSigIter->second.token;
+
+            logPrintf(LOG_LEVEL_DEBUG, "[*] localVarSigTok: %#x\n", localVarSigTok);
+        }
+    }
+
+    if (ILCodeSize >= 1 << 6) {
         // The method is too large to encode the size (i.e., at least 64 bytes)
         fat = 1;
     }
@@ -327,10 +369,6 @@ INT createNewMethodBody(ICorJitInfo *pCorJitInfo, struct CORINFO_METHOD_INFO *in
         // There are extra data sections 
         // Because there are exception handlers, so a extra CorILMethod_Sect_EHTable is needed
         fat = 1;
-
-        if (!validLocalVarSigTok) {
-            localVarSigTok = 0;
-        }
 
         logPrintf(LOG_LEVEL_DEBUG, "[*] EHcount: %d\n", info->EHcount);
 
@@ -630,6 +668,7 @@ CorJitResult compileMethodHook(
 
     logPrintf(LOG_LEVEL_INFO, "\t[*] Token: %x\n", token);
     logPrintf(LOG_LEVEL_INFO, "\t[*] Name: %s\n", method.methodName.c_str());
+    logPrintf(LOG_LEVEL_DEBUG, "\t[*] info->locals.pSig : %p\n", info->locals.pSig);
 
     // Check whether the IL has been edited
     if (info->ILCodeSize == method.methodILCodeSize) {
@@ -783,6 +822,7 @@ void assemblyAnalyze(void)
     BYTE *streamHdr = metadataRoot + 0x14 + paddedVersionLen;
     BYTE *tildeStreamHdr = NULL;
     BYTE *stringsStreamHdr = NULL;
+    BYTE *blobStreamHdr = NULL;
 
     for (UINT i = 0; i < numOfStreams; ++i) {
         std::string rcName((char *)(streamHdr + 8));
@@ -791,6 +831,8 @@ void assemblyAnalyze(void)
             tildeStreamHdr = streamHdr;
         } else if (rcName == "#Strings") {
             stringsStreamHdr = streamHdr;
+        } else if (rcName == "#Blob") {
+            blobStreamHdr = streamHdr;
         }
         streamHdr += 0x8 + ((rcName.length() + 4) & (~0x03));
     }
@@ -801,7 +843,11 @@ void assemblyAnalyze(void)
     UINT stringsIOffset = *(UINT *)stringsStreamHdr;
     UINT stringsISize = *(UINT *)(stringsStreamHdr + 4);
 
+    UINT blobIOffset = *(UINT *)blobStreamHdr;
+    UINT blobISize = *(UINT *)(blobStreamHdr + 4);
+
     BYTE *stringsStream = metadataRoot + stringsIOffset;
+    BYTE *blobStream = metadataRoot + blobIOffset;
 
     // ECMA-335 6th II.24.2.6
     BYTE *tableStream = metadataRoot + tildeIOffset;
@@ -821,6 +867,8 @@ void assemblyAnalyze(void)
         }
     }
 
+    // Get StandAlongSig table
+
     UINT metadataTableSizes[] = {
         0xa, // module_size
         0x6, // typeref_size
@@ -828,14 +876,25 @@ void assemblyAnalyze(void)
         0,
         0x6, // field_size
         0,
-        0xe, // methoddef_size 
+        0xe, // methoddef_size
+        0x0,
+        0x6, // param_size
+        0x4, // interfaceImpl_size
+        0x6, // memberref_size
+        0x6, // constant_size
+        0x6, // customAttribute_size
+        0x4, // fieldMarshal_size
+        0x6, // declSecurity_size
+        0x8, // classLayout_size
+        0x6, // fieldLayout_size
+        0x2, // standAlongSig_size
     };
 
-    BYTE **tables = new BYTE * [7];
+    BYTE **tables = new BYTE * [0x12];
 
     tables[0] = rows;
 
-    for (ULONG i = 1; i < 7; ++i) {
+    for (ULONG i = 1; i < 0x12; ++i) {
         tables[i] = tables[i - 1] + metadataTableNums[i - 1] * metadataTableSizes[i - 1];
     }
 
@@ -881,6 +940,24 @@ void assemblyAnalyze(void)
         methodMap[token] = { prva, name, header, code, codesize, rvas.find(*prva) != rvas.end() };
 
         rvas.insert(*prva);
+    }
+
+    BYTE *standAlongSigTable = tables[0x11];
+
+    for (UINT i = 0; i < metadataTableNums[0x11]; ++i, standAlongSigTable += 0x2) {
+        USHORT offset = *(USHORT *)standAlongSigTable;
+        BYTE *pSig = blobStream + offset;
+        UINT token = 0x11000000 | (i + 1);
+
+        std::vector<uint8_t> sig = getLocalVarSig(pSig);
+
+        SHA1 sha1;
+
+        sha1.update(sig);
+
+        localVarSigMap[sha1.final()] = { token, std::move(sig) };
+
+        logPrintf(LOG_LEVEL_DEBUG, "\t[*] StandAlongSig[%d] %#llx: %#hx\n", i, token, offset);
     }
 }
 

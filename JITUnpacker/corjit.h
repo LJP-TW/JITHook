@@ -27,7 +27,6 @@ class ICorJitInfo;
 
 typedef void *CORINFO_METHOD_HANDLE;
 typedef void *CORINFO_MODULE_HANDLE;
-typedef void *CORINFO_SIG_INFO;
 
 // These are returned from getMethodOptions
 enum CorInfoOptions
@@ -51,6 +50,23 @@ enum CorInfoRegionKind
     CORINFO_REGION_HOT,
     CORINFO_REGION_COLD,
     CORINFO_REGION_JIT,
+};
+
+struct CORINFO_SIG_INFO
+{
+    void                       *callConv;
+    void                       *retTypeClass;
+    void                       *retTypeSigClass;
+    uint64_t                    retType_flags_numArgs;
+    uint64_t                    sigInst0;
+    uint64_t                    sigInst1;
+    uint64_t                    sigInst2;
+    uint64_t                    sigInst3;
+    void                       *args;
+    uint8_t                    *pSig;
+    void                       *cbSig; // uint32_t
+    void                       *scope;
+    void                       *token; // uint32_t
 };
 
 struct CORINFO_METHOD_INFO
